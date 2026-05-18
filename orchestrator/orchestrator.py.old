@@ -1,0 +1,227 @@
+import asyncio
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+import aiohttp
+import aioredis
+import async_timeout
+
+# -------------------------
+# Configuration & constants
+# -------------------------
+REDIS_URL = "redis://localhost"
+HTTP_TIMEOUT = 5  # seconds
+RETRY_DELAY = 1  # seconds
+MAX_RETRIES = 3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("orchestrator")
+
+# -------------------------
+# Lightweight helpers
+# -------------------------
+async def retry(coro_fn, *args, retries=MAX_RETRIES, delay=RETRY_DELAY, **kwargs):
+    """Simple retry helper for async operations."""
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as e:
+            last_exc = e
+            logger.warning("Attempt %d/%d failed: %s", attempt, retries, e)
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    raise last_exc
+
+# -------------------------
+# Clients
+# -------------------------
+class SliceClient:
+    """Client for interacting with an OAI-like SMF/AMF Slice API."""
+
+    def __init__(self, base_url: str, session: aiohttp.ClientSession):
+        self.base_url = base_url.rstrip("/")
+        self.session = session
+
+    async def get_ue_context(self, ue_id: str) -> Dict[str, Any]:
+        url = f"{self.base_url}/ue-context/{ue_id}"
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.get(url) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+
+    async def post_ue_context(self, ue_id: str, context: Dict[str, Any]) -> None:
+        url = f"{self.base_url}/ue-context/{ue_id}"
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=context) as resp:
+                resp.raise_for_status()
+
+    async def bind_ue(self, ue_id: str, imported_context: Dict[str, Any]) -> None:
+        """Instruct SMF/AMF to bind the imported context to the UE."""
+        url = f"{self.base_url}/bind/{ue_id}"
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=imported_context) as resp:
+                resp.raise_for_status()
+
+class RedisStore:
+    """Small wrapper around aioredis to store/retrieve contexts."""
+
+    def __init__(self, redis_url: str = REDIS_URL):
+        self.redis_url = redis_url
+        self._pool = None
+
+    async def connect(self):
+        self._pool = aioredis.from_url(self.redis_url)
+
+    async def close(self):
+        if self._pool:
+            await self._pool.close()
+
+    async def set_context(self, key: str, value: Dict[str, Any], ex: Optional[int] = None):
+        await self._pool.set(key, str(value), ex=ex)  # simple serialization; replace with json.dumps in prod
+
+    async def get_context(self, key: str) -> Optional[Dict[str, Any]]:
+        val = await self._pool.get(key)
+        if val is None:
+            return None
+        # naive eval-based deserialize for sample; use json.loads in production
+        return eval(val)
+
+class FlexRANClient:
+    """Client to notify FlexRAN about slice/QoS mapping changes."""
+    def __init__(self, base_url: str, session: aiohttp.ClientSession):
+        self.session = session
+        self.base_url = base_url.rstrip("/")
+
+    async def notify_slice_change(self, ue_id: str, new_slice: str) -> None:
+        url = f"{self.base_url}/slice-change"
+        payload = {"ue_id": ue_id, "new_slice": new_slice}
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=payload) as resp:
+                resp.raise_for_status()
+
+class UPFClient:
+    """UPF client (PFCP or REST) to request tunnel reconfiguration."""
+    def __init__(self, base_url: str, session: aiohttp.ClientSession):
+        self.session = session
+        self.base_url = base_url.rstrip("/")
+
+    async def reconfigure_tunnels(self, ue_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.base_url}/pfcp/reconfigure"
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json={"ue_id": ue_id, **params}) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+
+# -------------------------
+# Orchestrator abstraction
+# -------------------------
+@dataclass
+class UEInfo:
+    ue_id: str
+    current_slice: str
+    target_slice: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+class Orchestrator:
+    def __init__(
+        self,
+        slice_a_client: SliceClient,
+        slice_b_client: SliceClient,
+        redis_store: RedisStore,
+        flexran: FlexRANClient,
+        upf: UPFClient,
+    ):
+        self.slice_a = slice_a_client
+        self.slice_b = slice_b_client
+        self.redis = redis_store
+        self.flexran = flexran
+        self.upf = upf
+
+    async def monitor_and_maybe_migrate(self, ue: UEInfo) -> None:
+        """
+        High-level monitoring callback. In a real system this might be driven by metrics/alerting.
+        Here, we assume the decision is already made externally and passed in ue.target_slice.
+        """
+        logger.info("Monitor: UE=%s current_slice=%s", ue.ue_id, ue.current_slice)
+        if not ue.target_slice or ue.target_slice == ue.current_slice:
+            logger.info("No migration needed for UE=%s", ue.ue_id)
+            return
+
+        logger.info("Decided to migrate UE=%s -> %s", ue.ue_id, ue.target_slice)
+        await self.migrate_ue(ue)
+
+    async def migrate_ue(self, ue: UEInfo) -> None:
+        """Perform inter-slice migration steps referencing the diagram's flow."""
+        ue_id = ue.ue_id
+
+        # 3. GET context from source slice (Slice A)
+        logger.info("Step 3: Fetching UE context from source slice %s", ue.current_slice)
+        context = await retry(self.slice_a.get_ue_context, ue_id)
+        ue.context = context
+        logger.debug("Fetched context for %s: %s", ue_id, context)
+
+        # store in redis (diagram: OAI A -> Redis)
+        logger.info("Storing context in Redis for handover")
+        await retry(self.redis.set_context, f"ue:{ue_id}:context", context, retries=2)
+
+        # 4. POST/import context to target slice (Slice B)
+        logger.info("Step 4: Posting context to target slice %s", ue.target_slice)
+        await retry(self.slice_b.post_ue_context, ue_id, context)
+
+        # have target slice fetch/import context from Redis if they prefer that pattern
+        # (diagram shows Redis <- Slice B fetch)
+        # In this sample, we assume step is either done by our post or by the slice pulling from Redis.
+
+        # 5. Instruct slice B to bind UE with imported context
+        logger.info("Step 5: Instructing target slice to bind UE")
+        await retry(self.slice_b.bind_ue, ue_id, context)
+
+        # 6. Notify FlexRAN of slice change
+        logger.info("Step 6: Notifying FlexRAN about slice change")
+        await retry(self.flexran.notify_slice_change, ue_id, ue.target_slice)
+
+        # 7. Update UPF tunnels (PFCP reconfiguration)
+        logger.info("Step 7: Reconfiguring UPF tunnels for UE")
+        pfcp_params = {"new_slice": ue.target_slice, "ue_context": context.get("upf_info", {})}
+        upf_resp = await retry(self.upf.reconfigure_tunnels, ue_id, pfcp_params)
+        logger.debug("UPF response: %s", upf_resp)
+
+        # 8. Confirm completion (ack)
+        logger.info("Step 8: Confirming completion and cleaning up")
+        # Example: store migration metadata or call back to source slice to release old context
+        # Here we send a simple cleanup post (not implemented on client for brevity)
+        # Optionally instruct source slice to remove old UE binding (not shown)
+
+        logger.info("Migration complete for UE=%s -> %s", ue_id, ue.target_slice)
+
+# -------------------------
+# Example usage
+# -------------------------
+async def main():
+    # create HTTP session for all clients
+    async with aiohttp.ClientSession() as session:
+        # instantiate clients with example endpoints (replace with real addresses)
+        slice_a_client = SliceClient("http://localhost:8001", session)
+        slice_b_client = SliceClient("http://localhost:8002", session)
+        flexran = FlexRANClient("http://localhost:9000", session)
+        upf = UPFClient("http://localhost:7000", session)
+
+        # connect to redis
+        redis_store = RedisStore(REDIS_URL)
+        await redis_store.connect()
+
+        orch = Orchestrator(slice_a_client, slice_b_client, redis_store, flexran, upf)
+
+        # simulate a decision to migrate UE 'U123' from sliceA -> sliceB
+        ue = UEInfo(ue_id="U123", current_slice="sliceA", target_slice="sliceB")
+
+        try:
+            await orch.monitor_and_maybe_migrate(ue)
+        finally:
+            await redis_store.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
