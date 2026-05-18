@@ -1,15 +1,17 @@
+import json
 import asyncio
 import logging
+import time
 from datetime import datetime
+from typing import Dict, Any, Optional
+import redis.asyncio as redis
 
-from .models import UEInfo
-
-
-RETRY_DELAY = 1
-MAX_RETRIES = 3
+from models import UEInfo
+from clients import SliceClient, FlexRANClient, UPFClient
 
 logger = logging.getLogger("orchestrator")
-
+MAX_RETRIES = 3
+RETRY_DELAY = 1
 
 async def retry(coro_fn, *args, retries=MAX_RETRIES, delay=RETRY_DELAY, **kwargs):
     last_exc = None
@@ -24,75 +26,109 @@ async def retry(coro_fn, *args, retries=MAX_RETRIES, delay=RETRY_DELAY, **kwargs
     raise last_exc
 
 
+class RedisStore:
+    def __init__(self, redis_url: str):
+        self.redis_url = redis_url
+        self.redis_client = None
+
+    async def connect(self):
+        self.redis_client = redis.from_url(self.redis_url, decode_responses=True)
+
+    async def close(self):
+        if self.redis_client:
+            await self.redis_client.close()
+
+    async def set_context(self, key: str, val: Dict, ex=300):
+        await self.redis_client.set(key, json.dumps(val), ex=ex)
+
+    async def get_context(self, key: str) -> Optional[Dict[str, Any]]:
+        val = await self.redis_client.get(key)
+        return json.loads(val) if val else None
+
+    async def set_migration_state(self, ue_id: str, state: str, data: Dict = None):
+        payload = {"state": state, "updated_at": str(asyncio.get_event_loop().time())}
+        if data:
+            payload["metadata"] = data
+        await self.redis_client.set(f"migrate_state:{ue_id}", json.dumps(payload), ex=300)
+
+    async def store_metric(self, ue_id: str, metric_name: str, value: float):
+        await self.redis_client.set(f"metric:{ue_id}:{metric_name}", value, ex=3600)
+        await self.redis_client.lpush(f"stats:history:{metric_name}", value)
+        await self.redis_client.ltrim(f"stats:history:{metric_name}", 0, 9)
+
+    async def add_migration_history(self, record: Dict[str, Any]):
+        await self.redis_client.lpush("stats:history", json.dumps(record))
+        await self.redis_client.ltrim("stats:history", 0, 4)
+
+
 class Orchestrator:
-    def __init__(self, slice_a_client, slice_b_client, redis_store, flexran, upf):
+    def __init__(self, slice_a_client: SliceClient, slice_b_client: SliceClient, redis_store: RedisStore, flexran: FlexRANClient, upf: UPFClient):
         self.slice_a = slice_a_client
         self.slice_b = slice_b_client
         self.redis = redis_store
         self.flexran = flexran
         self.upf = upf
 
-    async def monitor_and_maybe_migrate(self, ue: UEInfo) -> None:
-        logger.info("Monitor: UE=%s current_slice=%s", ue.ue_id, ue.current_slice)
-        if not ue.target_slice or ue.target_slice == ue.current_slice:
-            logger.info("No migration needed for UE=%s", ue.ue_id)
-            return
-        logger.info("Decided to migrate UE=%s -> %s", ue.ue_id, ue.target_slice)
-        await self.migrate_ue(ue)
-
-    async def migrate_ue(self, ue: UEInfo) -> None:
+    async def migrate_ue_seamless(self, ue: UEInfo, pdu_id: int):
         ue_id = ue.ue_id
         try:
             await self.redis.set_migration_state(ue_id, "INIT")
+            source_ctx = await self.slice_a.get_ue_context(ue_id)
+        
+            await self.redis.set_migration_state(ue_id, "PREPARING")
+            target_sm_res = await self.slice_b.nsmf_pdusession_create(ue_id, source_ctx)
 
-            logger.info("Step 1: Fetching UE context from source slice %s", ue.current_slice)
-            context = await retry(self.slice_a.get_ue_context, ue_id)
-            ue.context = context
+            context = await self.slice_a.namf_comm_get_context(ue_id)
+            await self.redis.set_context(f"ue:{ue_id}:context", context)
+            await self.slice_b.nsmf_pdusession_import_notification(ue_id)
+        
+            await self.redis.set_migration_state(ue_id, "UPF_CONFIGURING")
+            try:
+                await self.upf.create_shadow_tunnel(ue_id, pdu_id, target_sm_res)
+            except Exception as e:
+                logger.error(f"Step 3 Failed: {e}. Initiating Rollback.")
+                await self.handle_rollback(ue, pdu_id, "UPF_CONFIGURING")
+                return
 
-            logger.info("Step 2: Storing context in Redis")
-            await retry(self.redis.set_context, f"ue:{ue_id}:context", context, retries=2)
+            start_hit = time.perf_counter() 
 
-            logger.info("Step 3: Posting context to target slice %s", ue.target_slice)
-            await retry(self.slice_b.post_ue_context, ue_id, context)
+            await self.flexran.notify_slice_change(ue_id, ue.target_slice)
+            await self.upf.reconfigure_tunnels(ue_id, pdu_id, context)
+            await self.slice_b.confirm_binding(ue_id)
+            await self.slice_b.commit_session(ue_id, pdu_id)
 
-            logger.info("Step 4: Notifying FlexRAN about slice change")
-            await retry(self.flexran.notify_slice_change, ue_id, ue.target_slice)
+            end_hit = time.perf_counter()
+            hit_ms = (end_hit - start_hit) * 1000 
 
-            logger.info("Step 5: Reconfiguring UPF tunnels")
-            pfcp_params = {
-                "new_slice": ue.target_slice,
-                "ue_context": context.get("upf_info", {}),
-            }
-            await retry(self.upf.reconfigure_tunnels, ue_id, pfcp_params)
-
-            logger.info("Step 6: Releasing old context on source slice")
-            await self.slice_a.namf_comm_release(ue_id)
-
-            hit_ms = 2.0
             await self.redis.store_metric(ue_id, "handover_interruption_ms", hit_ms)
             await self.redis.set_migration_state(ue_id, "COMMITTED")
-
-            record = {
+            await self.slice_a.namf_comm_release(ue_id)
+            
+            history_record = {
                 "ue_id": ue_id,
                 "status": "SUCCESS",
                 "hit": hit_ms,
                 "target_slice": ue.target_slice,
-                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "timestamp": datetime.now().strftime("%H:%M:%S")
             }
-            await self.redis.add_migration_history(record)
-
-            logger.info("Migration complete for UE=%s -> %s", ue_id, ue.target_slice)
+            await self.redis.add_migration_history(history_record)
+            await self.redis.redis_client.set("stats:latest_hit", hit_ms)
+            await self.redis.redis_client.lpush("stats:hit_trend", hit_ms)
+            await self.redis.redis_client.ltrim("stats:hit_trend", 0, 9)
 
         except Exception as e:
-            logger.exception("Migration failed for UE=%s: %s", ue_id, e)
-            await self.redis.set_migration_state(ue_id, "FAILED", {"error": str(e)})
+            logger.critical(f"Unexpected system failure: {e}")
+            await self.handle_rollback(ue, pdu_id, "UNKNOWN")
 
-            record = {
-                "ue_id": ue_id,
-                "status": "FAILED",
-                "hit": None,
-                "target_slice": ue.target_slice,
-                "timestamp": datetime.now().strftime("%H:%M:%S"),
-            }
-            await self.redis.add_migration_history(record)
-            raise
+    async def handle_rollback(self, ue: UEInfo, pdu_id: int, failed_step: str):
+        logger.warning(f"Initiating Rollback for {ue.ue_id} at step: {failed_step}")
+        await self.redis.set_migration_state(ue.ue_id, "ROLLBACK_COMPLETE")
+        
+        history_record = {
+            "ue_id": ue.ue_id,
+            "status": "FAILED",
+            "hit": None,
+            "target_slice": ue.target_slice,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+        await self.redis.add_migration_history(history_record)
