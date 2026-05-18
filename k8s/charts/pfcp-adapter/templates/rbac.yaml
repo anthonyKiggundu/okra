@@ -1,0 +1,32 @@
+{{- if .Values.rbac.create }}
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pfcp-adapter
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pfcp-adapter-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pfcp-adapter-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: pfcp-adapter
+roleRef:
+  kind: Role
+  name: pfcp-adapter-role
+  apiGroup: rbac.authorization.k8s.io
+
+{{- end }}
+

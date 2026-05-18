@@ -1,0 +1,6 @@
+apiVersion: v2
+name: oai-core
+description: Helm chart for OpenAirInterface 5G Core (AMF, SMF, UPF)
+version: 0.1.0
+appVersion: "1.6.0"
+

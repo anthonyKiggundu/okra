@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: celery-worker }
+  template:
+    metadata: { labels: { app: celery-worker } }
+    spec:
+      containers:
+      - name: worker
+        image: your-registry/orchestrator:latest
+        command: ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=2"]
+        env:
+          - name: CELERY_BROKER_URL
+            value: "redis-master.5g.svc.cluster.local:6379/1"
+          - name: CELERY_BACKEND_URL
+            value: "redis-master.5g.svc.cluster.local:6379/2"

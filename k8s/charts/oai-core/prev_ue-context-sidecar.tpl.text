@@ -1,0 +1,16 @@
+{{- define "oai-core.ue-context-sidecar" -}}
+- name: context-adapter
+  image: "{{ .Values.sidecar.image.repository }}:{{ .Values.sidecar.image.tag }}"
+  imagePullPolicy: {{ .Values.sidecar.image.pullPolicy | default "IfNotPresent" }}
+  env:
+    - name: REDIS_URL
+      value: "{{ .Values.redis.url }}"
+    - name: CONTEXT_TTL
+      value: "{{ .Values.sidecar.contextTtl | default "300" }}"
+  ports:
+    - containerPort: 8081
+      name: http-context
+      protocol: TCP
+  resources:
+{{ toYaml .Values.sidecar.resources | indent 4 }}
+{{- end -}}

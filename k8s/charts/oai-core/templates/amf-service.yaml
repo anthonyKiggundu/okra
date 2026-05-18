@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-amf
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: oai-amf
+spec:
+  type: {{ .Values.amf.service.type | default "ClusterIP" }}
+  selector:
+    app: oai-amf
+  ports:
+  - name: ngap
+    port: {{ .Values.amf.ngapPort | default 38412 }}
+    targetPort: {{ .Values.amf.ngapPort | default 38412 }}
+    protocol: SCTP
+  - name: sbi
+    port: {{ .Values.amf.sbiPort | default 443 }}
+    targetPort: {{ .Values.amf.sbiPort | default 443 }}
+    protocol: TCP
+  {{- if .Values.amf.metricsPort }}
+  - name: metrics
+    port: {{ .Values.amf.metricsPort }}
+    targetPort: {{ .Values.amf.metricsPort }}
+    protocol: TCP
+  {{- end }}

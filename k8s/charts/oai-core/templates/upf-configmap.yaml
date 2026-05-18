@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-upf-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+    log_level:
+      general: debug
+      upf: debug
+    
+    register_nf:
+      general: yes
+    
+    http_version: 2
+    
+    # NRF configuration (optional - set to 'no' if not using NRF)
+    nrf:
+      host: oai-nrf
+      port: 80
+      api_version: v1
+      sbi:
+        port: 80
+        api_version: v1
+        interface_name: eth0
+    
+    # UPF configuration
+    upf:
+      support_features:
+        enable_bpf_datapath: no
+        enable_snat: yes
+      remote_n6_gw: {{ .Values.upf.n6Gateway | default "192.168.70.201" }}
+      
+      # Network interfaces - using standard Kubernetes pod interface
+      upf_info:
+        snat: yes
+        interface_name:
+        - {{ .Values.upf.n3InterfaceName | default "eth0" }}
+        - {{ .Values.upf.n4InterfaceName | default "eth0" }}
+        - {{ .Values.upf.n6InterfaceName | default "eth0" }}
+        
+      # PFCP (N4) interface configuration
+      pfcp:
+        enable: yes
+        node_id: {{ .Values.upf.n4NodeId | default "127.0.0.1" }}
+        sbi:
+          interface_name: {{ .Values.upf.n4InterfaceName | default "eth0" }}
+          port: {{ .Values.upf.pfcpPort | default 8805 }}
+      
+      # GTP-U (N3) interface configuration  
+      gtpu:
+        enable: yes
+        sbi:
+          interface_name: {{ .Values.upf.n3InterfaceName | default "eth0" }}
+          port: {{ .Values.upf.gtpuPort | default 2152 }}
+    
+    # DNN (Data Network Name) configurations
+    dnns:
+    - dnn: "oai"
+      pdu_session_type: "IPV4"
+      ipv4_subnet: "12.1.1.0/24"
+    - dnn: "internet"
+      pdu_session_type: "IPV4"
+      ipv4_subnet: "12.1.1.0/24"
+    - dnn: "ims"
+      pdu_session_type: "IPV4V6"
+      ipv4_subnet: "12.1.1.0/24"

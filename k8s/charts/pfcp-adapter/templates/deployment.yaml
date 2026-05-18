@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pfcp-adapter
+  labels:
+    app: pfcp-adapter
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: pfcp-adapter
+  template:
+    metadata:
+      labels:
+        app: pfcp-adapter
+    spec:
+      serviceAccountName: pfcp-adapter
+      containers:
+        - name: pfcp-adapter
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+            - containerPort: {{ .Values.pfcp.port }}
+              protocol: UDP
+          env:
+            - name: PFCP_PORT
+              value: "{{ .Values.pfcp.port }}"
+            - name: PFCP_TIMEOUT
+              value: "{{ .Values.pfcp.timeout }}"
+            - name: UPF_IP
+              value: "{{ .Values.upf.ip }}"
+            - name: UPF_PORT
+              value: "{{ .Values.upf.port }}"
+            - name: PFCP_BIND_ADDR
+              value: "0.0.0.0"
+
+          volumeMounts:
+            {{- if .Values.tls.enabled }}
+            - name: tls
+              mountPath: "/etc/pfcp-adapter/tls"
+              readOnly: true
+            {{- end }}
+
+      volumes:
+        {{- if .Values.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+        {{- end }}

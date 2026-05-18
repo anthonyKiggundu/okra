@@ -1,0 +1,31 @@
+amf:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+  ngapPort: 38412      # ADD THIS
+  sbiPort: 443         # ADD THIS
+  metricsPort: 9100    # ADD THIS (optional)
+  config:
+    amf_name: "oai-amf"
+    network_ip: "0.0.0.0"
+
+smf:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+  sbiPort: 443         # ADD THIS
+  metricsPort: 9100    # ADD THIS (optional)
+
+upf:
+  enabled: true
+  hostNetwork: true
+  gtpuPort: 2152       # ADD THIS
+  pfcpPort: 8805       # ADD THIS
+  metricsPort: 9100    # ADD THIS (optional)
+  service:             # ADD THIS
+    type: ClusterIP    # ADD THIS
+  gatewayInterfaces:
+    - name: upf_gtp
+      ip: 10.10.0.1

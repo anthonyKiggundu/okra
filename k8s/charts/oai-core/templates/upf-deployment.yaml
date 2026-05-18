@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-upf
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: oai-upf
+  template:
+    metadata:
+      labels:
+        app: oai-upf
+    spec:
+      {{- if .Values.upf.hostNetwork }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      containers:
+      - name: upf
+        image: {{ .Values.upf.image }}
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - SYS_ADMIN
+        ports:
+        - name: gtpu
+          containerPort: {{ .Values.upf.gtpuPort | default 2152 }}
+          protocol: UDP
+        - name: pfcp
+          containerPort: {{ .Values.upf.pfcpPort | default 8805 }}
+          protocol: UDP
+        {{- if .Values.upf.metricsPort }}
+        - name: metrics
+          containerPort: {{ .Values.upf.metricsPort }}
+          protocol: TCP
+        {{- end }}
+        env:
+        - name: TZ
+          value: Europe/Paris
+        volumeMounts:
+        - name: upf-config
+          mountPath: /openair-upf/etc/config.yaml
+          subPath: config.yaml
+        resources:
+{{ toYaml .Values.upf.resources | indent 10 }}
+      volumes:
+      - name: upf-config
+        configMap:
+          name: oai-upf-config

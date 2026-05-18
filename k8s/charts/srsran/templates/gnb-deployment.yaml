@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: srsran-gnb
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: srsran-gnb
+  template:
+    metadata:
+      labels:
+        app: srsran-gnb
+    spec:
+      containers:
+      - name: gnb
+        image: {{ .Values.image }}
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - SYS_ADMIN
+            - IPC_LOCK
+        command: ["/opt/oai-gnb/bin/nr-softmodem"]
+        args:
+          - "-O"
+          - "/configs/gnb.conf"
+          - "--sa"
+          - "--rfsim"              # Add RF simulator mode
+          - "--log_config.global_log_level"
+          - "info"
+        volumeMounts:
+        - name: gnb-config
+          mountPath: /configs
+        - name: dev-shm
+          mountPath: /dev/shm      # Shared memory for RF simulator
+        ports:
+        - name: gtpu
+          containerPort: 2152
+          protocol: UDP
+        - name: ngap
+          containerPort: 38412
+          protocol: SCTP
+        - name: rfsim
+          containerPort: 4043      # RF simulator port
+          protocol: TCP
+        env:
+        - name: TZ
+          value: Europe/Paris
+        - name: RFSIMULATOR
+          value: "server"          # Run as RF simulator server
+        - name: USE_SA_TDD_MONO
+          value: "yes"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+      volumes:
+      - name: gnb-config
+        configMap:
+          name: srsran-config
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: srsran-gnb
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: gtpu
+    port: 2152
+    targetPort: 2152
+    protocol: UDP
+  - name: ngap
+    port: 38412
+    targetPort: 38412
+    protocol: SCTP
+  - name: rfsim
+    port: 4043
+    targetPort: 4043
+    protocol: TCP
+  selector:
+    pp: srsran-gnb

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pfcp-adapter-config
+data:
+  config.json: |
+    {
+      "log_level": "info"
+    }

@@ -1,0 +1,17 @@
+# srsran-values.yaml
+# srsRAN k8s guide for parameters such as split, RU interface or hardware passthrough.
+
+gnb:
+  enabled: true
+  image:
+    repository: srsran/gnb
+    tag: latest
+  config:
+    amf_ip: "oai-amf.5g.svc.cluster.local"
+  resources:
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+    requests:
+      cpu: "2"
+      memory: "4Gi"

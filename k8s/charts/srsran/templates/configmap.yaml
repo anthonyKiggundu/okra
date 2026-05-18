@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: srsran-config
+  namespace: {{ .Release.Namespace }}
+data:
+  gnb.conf: |
+    Active_gNBs = ( "gNB-OAI" );
+    Asn1_verbosity = "none";
+
+    gNBs = (
+    {
+        gNB_ID = 0xe00;
+        gNB_name = "gNB-OAI";
+        tracking_area_code = 1;
+        plmn_list = ({
+          mcc = 001;
+          mnc = 01;
+          mnc_length = 2;
+          snssaiList = ({sst = 1})
+        });
+
+        # Security configuration
+        security = {
+          integrity_algorithm = [ "NIA2" , "NIA1" , "NIA0" ];
+          ciphering_algorithm = [ "NEA0" , "NEA1" , "NEA2" ];
+        };
+
+        min_rxtxtime = 6;
+        
+        servingCellConfigCommon = (
+        {
+            physCellId = 0;
+            
+            # Downlink configuration - FIXED frequencies for band 78
+            frequencyInfoDL = (
+            {
+                absoluteFrequencySSB = 641280;   # 3619.20 MHz #620736;       # Valid for band 78 (3489.42 MHz)
+                dl_frequencyBand = 78;
+                dl_absoluteFrequencyPointA = 640000; # 3600.00 MHz # 620112; # 3487.92 MHz
+                dl_offstToCarrier = 0;
+                dl_SCS_SubcarrierSpacing = "kHz30";
+                dl_carrierBandwidth = 106;           # 40 MHz bandwidth
+            });
+            
+            # Uplink configuration
+            frequencyInfoUL = (
+            {
+                ul_frequencyBand = 78;
+                ul_absoluteFrequencyPointA = 640000;#620112;
+                ul_offstToCarrier = 0;
+                ul_SCS_SubcarrierSpacing = "kHz30";
+                ul_carrierBandwidth = 106;
+            });
+        });
+
+        NETWORK_INTERFACES = {
+            GNB_INTERFACE_NAME_FOR_NG_AMF = "eth0";
+            GNB_IPV4_ADDRESS_FOR_NG_AMF = "0.0.0.0";
+            GNB_INTERFACE_NAME_FOR_NGU = "eth0";
+            GNB_IPV4_ADDRESS_FOR_NGU = "0.0.0.0";
+            GNB_PORT_FOR_S1U = 2152;
+        };
+    });
+
+    MACRLCs = (
+    {
+        num_cc = 1;
+        tr_s_preference = "local_L1";
+        tr_n_preference = "f1";
+        local_n_if_name = "lo";
+        remote_n_address = "127.0.0.1";
+        local_n_address = "127.0.0.1";
+        local_n_portc = 50000;
+        local_n_portd = 50001;
+        remote_n_portc = 50000;
+        remote_n_portd = 50001;
+    }
+    );
+
+    L1s = (
+    {
+        num_cc = 1;
+        tr_n_preference = "local_mac";
+    }
+    );
+
+    RUs = (
+    {
+        local_rf = "yes"
+        nb_tx = 1
+        nb_rx = 1
+        att_tx = 0
+        att_rx = 0;
+        bands = [78];
+        max_pdschReferenceSignalPower = -27;
+        max_rxgain = 114;
+        eNB_instances = [0];
+        sdr_addrs = "type=none";
+    }
+    );
+
+    log_config = {
+      global_log_level = "info";
+      hw_log_level = "info";
+      phy_log_level = "info";
+      mac_log_level = "info";
+      rlc_log_level = "info";
+      pdcp_log_level = "info";
+      rrc_log_level = "info";
+      ngap_log_level = "info";
+    };

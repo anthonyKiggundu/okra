@@ -1,0 +1,6 @@
+namespace: 5g-ric
+image: ghcr.io/anthonykiggundu/oai-flexric:dev
+service:
+  port: 4560
+replicaCount: 1
+

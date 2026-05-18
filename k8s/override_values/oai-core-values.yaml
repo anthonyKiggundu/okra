@@ -1,0 +1,27 @@
+# oai-core-values.yaml (adapt to the chart the project provides)
+# Replace network IPs with your cluster addresses. OAI CN chart variants exist — choose the one matching your cloned OAI repo. 
+# See OAI CN Helm docs for exact values.
+global:
+  imagePullPolicy: IfNotPresent
+
+amf:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+  config:
+    amf_name: "oai-amf"
+    network_ip: "0.0.0.0"
+
+smf:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+
+upf:
+  enabled: true
+  hostNetwork: true      # UPF often needs host networking for GTP-U
+  gatewayInterfaces:
+    - name: upf_gtp
+      ip: 10.10.0.1

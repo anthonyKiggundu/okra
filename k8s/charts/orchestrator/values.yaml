@@ -1,0 +1,49 @@
+namespace: ""  # empty means "use the Helm release namespace" by default
+
+# Backwards-compatible top-level image keys (keep for charts that use .Values.images.orchestrator)
+images:
+  orchestrator: yourdockerhub/inter-slice-orchestrator:latest
+  flexran: yourdockerhub/mock-flexran:latest
+  upf: yourdockerhub/mock-upf:latest
+  redis: redis:7
+
+# Backwards-compatible replica count (keep for templates that use .Values.replicaCount.orchestrator)
+replicaCount:
+  orchestrator: 1
+  redis: 1
+  flexran: 1
+  upf: 1
+
+tls:
+  crt: ""
+  key: ""
+
+resources: {}
+
+# Orchestrator & sidecar values (new, nested, self-contained block)
+orchestrator:
+  # image can be used by templates as .Values.orchestrator.image.repository/.tag
+  image:
+    repository: ghcr.io/anthonykiggundu/orchestrator
+    tag: latest
+    pullPolicy: IfNotPresent  # Provide the default image pull policy
+  env:
+    REDIS_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/0"
+    CELERY_BROKER_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/1"
+    CELERY_BACKEND_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/2"  
+    pullPolicy: IfNotPresent
+  # keep a replicas key to be used by updated templates (.Values.orchestrator.replicas)
+  replicas: 1
+  service:
+    # matches your service template which uses .Values.orchestrator.service.type
+    type: ClusterIP
+  resources: {}
+  # optional endpoints for notifications (FlexRAN / UPF)
+  ranNotifyUrl: ""  # e.g. http://flexran-controller.namespace.svc.cluster.local:8080/notify
+  upfNotifyUrl: ""  # e.g. http://oai-upf.namespace.svc.cluster.local:8080/notify
+  # optional imagePullSecrets: []
+  # optional ingress/settings, env, probes, etc. can go here
+  #
+
+redis:
+  url: "redis://redis-master.5g-core.svc.cluster.local:6379/0"

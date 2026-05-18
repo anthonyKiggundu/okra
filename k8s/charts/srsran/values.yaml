@@ -1,0 +1,14 @@
+namespace: 5g-ran
+image: oaisoftwarealliance/oai-gnb:develop
+
+service:
+  port: 2152
+replicaCount: 1
+
+gnb:
+  id: 0xe00
+  name: "gNB-OAI"
+  mcc: "001"
+  mnc: "01"
+  tac: 1
+  sst: 1

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slice-orchestrator
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.orchestrator.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: slice-orchestrator
+  template:
+    metadata:
+      labels:
+        app: slice-orchestrator
+    spec:
+      containers:
+      - name: orchestrator
+        image: "{{ .Values.orchestrator.image.repository }}:{{ .Values.orchestrator.image.tag }}"
+        imagePullPolicy: {{ .Values.orchestrator.image.pullPolicy | default "IfNotPresent" }}
+        env:
+        - name: REDIS_URL
+          value: "{{ .Values.redis.url }}"
+        - name: RAN_NOTIFY_URL
+          value: '{{ .Values.orchestrator.ranNotifyUrl | default "" }}'
+        - name: UPF_NOTIFY_URL
+          value: '{{ .Values.orchestrator.upfNotifyUrl | default "" }}'
+        ports:
+        - containerPort: 8080
+          name: http
+{{- with .Values.orchestrator.resources }}
+        resources:
+{{ toYaml . | nindent 10 }}
+{{- end }}            
+
+            #        resources: {{- if .Values.orchestrator.resources }}
+            #{{ toYaml .Values.orchestrator.resources | nindent 10 }}
+            #        {{- else }}
+            #{} 
+            #        {{- end }}

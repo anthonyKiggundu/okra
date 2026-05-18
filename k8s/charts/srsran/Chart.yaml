@@ -1,0 +1,6 @@
+apiVersion: v2
+name: srsran
+description: Helm chart for srsRAN or srsRAN-Project gNB/UE emulation
+version: 0.1.0
+appVersion: "22.10"
+

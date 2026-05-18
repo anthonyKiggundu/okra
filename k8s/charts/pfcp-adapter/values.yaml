@@ -1,0 +1,33 @@
+replicaCount: 1
+
+image:
+  repository: local/pfcp-adapter
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8081
+
+pfcp:
+  port: 8805
+  timeout: 3
+
+upf:
+  ip: "upf.slice-system.svc.cluster.local"
+  port: 8805
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+tls:
+  enabled: false
+  secretName: pfcp-adapter-tls
+
+rbac:
+  create: true

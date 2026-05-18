@@ -1,0 +1,54 @@
+repositories:
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+
+# Add this section
+helmDefaults:
+  createNamespace: true
+
+releases:
+  # Deploy Redis first
+  - name: redis
+    namespace: 5g-core
+    chart: bitnami/redis
+    version: 18.19.0
+    values:
+      - architecture: standalone
+      - auth:
+          enabled: false  # Disable password for simplicity (enable in production!)
+      - master:
+          persistence:
+            enabled: false  # Disable persistence for testing
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+  - name: oai-core
+    namespace: 5g-core
+    chart: ./charts/oai-core
+    values:
+      - ./charts/oai-core/values.yaml
+
+        #- name: srsran
+        #    namespace: 5g-ran
+        #    chart: ./charts/srsran
+        #    values:
+        #      - ./charts/srsran/values.yaml
+
+  - name: flexric
+    namespace: 5g-ric
+    chart: ./charts/flexric
+    values:
+      - ./charts/flexric/values.yaml
+
+  - name: orchestrator
+    namespace: 5g-orchestrator
+    chart: ./charts/orchestrator
+    values:
+      - ./charts/orchestrator/values.yaml
+    needs:
+      - 5g-core/redis  # Wait for Redis to be ready

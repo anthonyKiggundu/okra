@@ -1,0 +1,15 @@
+namespace: 5g-redis
+replicaCount: 1
+
+image:
+  repository: redis
+  tag: "6.2"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "250m"
+  limits:
+    memory: "128Mi"
+    cpu: "500m"

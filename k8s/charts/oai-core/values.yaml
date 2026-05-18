@@ -1,0 +1,114 @@
+# OAI core chart values (updated)
+# Chart-wide defaults
+namespace: 5g-core # default
+replicaCount: 1
+
+# -----------------------------------------------------------------------------
+# UPF (user plane)
+# -----------------------------------------------------------------------------
+upf:
+  # Image settings
+  image: "oaisoftwarealliance/oai-upf:latest"
+
+  # Ports (defaults)
+  # GTP-U user-plane (UDP)
+  gtpuPort: 2152
+  # PFCP (N4) control (UDP)
+  pfcpPort: 8805
+  # Optional metrics port (TCP). Set to null to disable.
+  metricsPort: 9100
+  hostNetwork: false  # Set to true if you need host networking
+
+  # Network interface configuration
+  n3InterfaceName: "eth0"  # GTP-U interface
+  n4InterfaceName: "eth0"  # PFCP interface
+  n6InterfaceName: "eth0"  # Data network interface
+  n4NodeId: "127.0.0.1"    # PFCP node ID
+  n6Gateway: "192.168.70.201"  # Adjust to your network
+
+  # Service configuration
+  service:
+    type: ClusterIP
+
+  # Optional resource requests/limits
+  resources: {}
+
+# -----------------------------------------------------------------------------
+# SMF (session management / control plane)
+# -----------------------------------------------------------------------------
+smf:
+  image: "oaisoftwarealliance/oai-smf" #"openairinterface/oai-smf:latest"
+
+  # Service-based interface (SBI) typically HTTPS/TCP. Change if your SMF
+  # listens on a different port.
+  sbiPort: 443
+
+  # Optional metrics port (TCP). Set to null to disable.
+  metricsPort: 9100
+
+  service:
+    type: ClusterIP
+
+  resources: {}
+
+# -----------------------------------------------------------------------------
+# AMF (access and mobility management function)
+# -----------------------------------------------------------------------------
+amf:
+  image: "oaisoftwarealliance/oai-amf:latest" #"openairinterface/amf:latest"
+
+  # NGAP (between AMF and gNB) uses SCTP on port 38412 by default for OAI.
+  ngapPort: 38412
+
+  # AMF service-based interface (SBI) usually HTTPS/TCP.
+  sbiPort: 443
+
+  # Optional metrics port (TCP). Set to null to disable.
+  metricsPort: 9100
+
+  service:
+    type: ClusterIP
+
+  resources: {}
+
+# -----------------------------------------------------------------------------
+# Common / misc
+# -----------------------------------------------------------------------------
+imagePullSecrets: []
+global: {}
+
+# Orchestrator & sidecar values (append or merge into existing values)
+orchestrator:
+  image:
+    repository: ghcr.io/anthonykiggundu/orchestrator   # set to your built image
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+  resources: {}
+  # optional endpoints for notifications (FlexRAN / UPF)
+  ranNotifyUrl: ""  # e.g. http://flexran-controller.namespace.svc.cluster.local:8080/notify
+  upfNotifyUrl: ""  # e.g. http://oai-upf.namespace.svc.cluster.local:8080/notify
+
+    #sidecar:
+    #  replicas: 1
+    #  port: 8080
+    #image:
+    #repository: ghcr.io/anthonykiggundu/okra-context-adapter  # set to your built sidecar image
+    #tag: latest
+    #pullPolicy: IfNotPresent
+    #  resources:
+    #requests:
+    #  memory: "128Mi"
+    #  cpu: "250m"
+    #limits:
+    #  memory: "256Mi"
+    #  cpu: "500m"
+global:
+  environment: production
+
+# Redis (minimal settings; you may already have a redis chart/helmfile)
+redis:
+  url: "redis://redis-master.5g-core.svc.cluster.local:6379/0" #"redis://redis-master.5g.svc.cluster.local:6379/0"
+

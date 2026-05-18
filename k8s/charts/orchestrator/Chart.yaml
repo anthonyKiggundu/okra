@@ -1,0 +1,7 @@
+apiVersion: v2
+name: slice-orchestrator
+description: Helm chart for Inter-Slice Orchestrator and supporting services
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+

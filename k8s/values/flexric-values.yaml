@@ -1,0 +1,4 @@
+namespace: 5g-ric
+image: mosaic5g/flexric:latest
+replicaCount: 1
+

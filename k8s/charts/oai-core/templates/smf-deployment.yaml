@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-smf
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: oai-smf
+  template:
+    metadata:
+      labels:
+        app: oai-smf
+    spec:
+      containers:
+      - name: smf
+        image: {{ .Values.smf.image }}
+        ports:
+        - name: sbi
+          containerPort: {{ .Values.smf.sbiPort | default 443 }}
+          protocol: TCP
+        {{- if .Values.smf.metricsPort }}
+        - name: metrics
+          containerPort: {{ .Values.smf.metricsPort }}
+          protocol: TCP
+        {{- end }}
+        env:
+        - name: TZ
+          value: Europe/Paris
+        resources:
+{{ toYaml .Values.smf.resources | indent 10 }}

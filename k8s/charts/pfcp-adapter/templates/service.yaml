@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pfcp-adapter
+spec:
+  selector:
+    app: pfcp-adapter
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
+      protocol: TCP
+      name: http
+    - port: {{ .Values.pfcp.port }}
+      targetPort: {{ .Values.pfcp.port }}
+      protocol: UDP
+      name: pfcp
