@@ -963,6 +963,11 @@ class amf_app {
   // config accessor for HTTP server wiring
   // const amf_config& get_amf_config() const { return amf_cfg; }
   const oai::config::amf_config& get_amf_config() const; // { return *amf_cfg; }
+							 //
+  // --------------- more Orchra ---------------------------
+  bool restore_ue_security_context(const std::string& supi, const std::string& kseaf_hex, const std::string& kamf_hex);
+  bool restore_ue_context_from_snapshot(const OrchraUeContextSnapshot& snap);
+  // ----------------- end of Orchra -----------------------
 };
 
 }  // namespace amf_application
