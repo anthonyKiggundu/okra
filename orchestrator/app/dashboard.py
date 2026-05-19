@@ -53,9 +53,13 @@ HTML_DASHBOARD_TEMPLATE = """
             <div class="card core">
                 <h2>📡 5G Core Network</h2>
                 <div class="status error" id="coreStatus">● CHECKING</div>
-                <p>AMF: oai-amf.5g-core.svc</p>
-                <p>SMF: oai-smf.5g-core.svc</p>
-                <p>UPF: oai-upf.5g-core.svc</p>
+                <p>AMF: oai-amf.oai-core.svc</p>
+                <p>SMF: oai-smf.oai-core.svc</p>
+                <p>UPF: oai-upf.oai-core.svc</p>
+                <p>MySQL: oai-mysql.oai-core.svc</p>
+                <p>AUSF: oai-ausf.oai-core.svc</p>
+                <p>UDM: oai-udm.oai-core.svc</p>
+                <p>UDR: oai-udr.oai-core.svc</p>
                 <span class="metric" id="coreMetric">0/3</span>
             </div>
             <div class="card ric">
@@ -74,7 +78,7 @@ HTML_DASHBOARD_TEMPLATE = """
             <div class="card redis">
                 <h2>💾 Context Storage (Redis)</h2>
                 <div class="status error" id="redisStatus">● CHECKING</div>
-                <p>Host: redis-master.5g-core.svc</p>
+                <p>Host: redis-master.oai-core.svc</p>
                 <span class="metric" id="redisMetric">—</span>
             </div>
         </div>
