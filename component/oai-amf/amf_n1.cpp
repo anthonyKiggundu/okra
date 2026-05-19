@@ -67,6 +67,7 @@
 #include "sha256.hpp"
 #include "utils.hpp"
 #include "AuthenticationReject.hpp"
+#include "../../oai-core-smf/src/smf_app/orchra_context.hpp"
 
 using namespace amf_application;
 using namespace boost::placeholders;
@@ -2643,18 +2644,28 @@ bool amf_n1::_5g_aka_confirmation_from_ausf(
   }
 
   // ------------------------ more Orchra --------------------------
-  std::string kseaf_hex = confirmation_data_response.getKseaf();
+  std::string kseaf_str = confirmation_data_response.getKseaf();
 
   char kamf_hex[65] = {};
-  const auto sec_idx = nc->security_ctx.value().vector_pointer;
+  // Safely default to index 0 if security_ctx is not yet initialized during AKA
+  int active_idx = 0; 
+  if (nc->security_ctx.has_value()) {
+      active_idx = nc->security_ctx.value().vector_pointer;
+  }
+
   for (int j = 0; j < 32; ++j) {
-     sprintf(&kamf_hex[j * 2], "%02x", nc->kamf[sec_idx][j]);
+      sprintf(&kamf_hex[j * 2], "%02x", nc->kamf[active_idx][j]);
   }
   kamf_hex[64] = '\0';
 
   Logger::amf_n1().info(
-        "!!! SECURITY_EXPORT !!! SUPI: %s | Kseaf: %s | Kamf: %s",
-  nc->supi.c_str(), kseaf_hex.c_str(), kamf_hex);
+      "!!! SECURITY_EXPORT !!! SUPI: %s | Kseaf: %s | Kamf: %s",
+      nc->supi.c_str(), kseaf_str.c_str(), kamf_hex
+  );
+
+  // Use the valid 'nc' object instead of the undefined 'sc' variable
+  OrchraUeContextSnapshot snap = snapshot_from_nas_context(nc, kseaf_str, std::string(kamf_hex));
+  orchra::export_snapshot_to_redis(snap);
   // ----------------------- end of Orchra -------------------------
 
   return true;
@@ -6275,3 +6286,30 @@ bool amf_n1::check_nas_message_for_current_procedure_running(
 
   return true;
 }
+
+// -------------------------- Orchra ---------------------------------------
+void amf_app::trigger_nas_count_resynchronization(std::shared_ptr<nas_context>& nc) {
+    Logger::amf_n1().info("Constructing downstream alignment payload to synchronize context tracking states");
+
+    // 1. Generate an encoded NAS message template container (e.g., Configuration Update Command or Identity Request)
+    bstring nas_payload;
+    // (Call internal library to serialize a valid integrity-protected NAS PDU using the new keys)
+    // nas_payload = nas_encoding::encode_configuration_update_command(nc);
+
+    // 2. Step G: Package as an ITTI downlink transport task
+    auto itti_msg = std::make_shared<itti_downlink_nas_transport>(TASK_AMF_APP, TASK_AMF_N2);
+
+    itti_msg->ran_ue_ngap_id = nc->ran_ue_ngap_id;
+    itti_msg->amf_ue_ngap_id = nc->amf_ue_ngap_id;
+    itti_msg->nas_pdu        = nas_payload;
+
+    // 3. Post to the communication bus
+    int send_rc = itti_inst->send_msg(itti_msg);
+    if (send_rc != 0) {
+        Logger::amf_app().error("Failed to post Downlink NAS transport event wrapper to N2 interface task bundle");
+    } else {
+        Logger::amf_app().info("Successfully pushed sync command downstream to handle target handover completion");
+    }
+}
+
+// -------------------------------- end of Orchra -----------------------------------------
