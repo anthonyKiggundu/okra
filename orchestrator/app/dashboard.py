@@ -1,3 +1,5 @@
+# dashboard.py
+
 HTML_DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -50,28 +52,28 @@ HTML_DASHBOARD_TEMPLATE = """
         <div class="grid">
             <div class="card core">
                 <h2>📡 5G Core Network</h2>
-                <div class="status running">● RUNNING</div>
+                <div class="status error" id="coreStatus">● CHECKING</div>
                 <p>AMF: oai-amf.5g-core.svc</p>
                 <p>SMF: oai-smf.5g-core.svc</p>
                 <p>UPF: oai-upf.5g-core.svc</p>
-                <span class="metric">3/3</span>
+                <span class="metric" id="coreMetric">0/3</span>
             </div>
             <div class="card ric">
                 <h2>🎛️ RAN Intelligent Controller</h2>
-                <div class="status running">● RUNNING</div>
+                <div class="status error" id="ricStatus">● CHECKING</div>
                 <p>Service: flexric.5g-ric.svc</p>
                 <p>Status: Monitoring RAN</p>
-                <span class="metric">Active</span>
+                <span class="metric" id="ricMetric">—</span>
             </div>
             <div class="card orchestrator">
                 <h2>🎯 Slice Orchestrator</h2>
-                <div class="status running">● RUNNING</div>
+                <div class="status error" id="orchStatus">● CHECKING</div>
                 <p>Function: Context Relocation Engine</p>
-                <span class="metric">Online</span>
+                <span class="metric" id="orchMetric">—</span>
             </div>
             <div class="card redis">
                 <h2>💾 Context Storage (Redis)</h2>
-                <div class="status running" id="redisStatus">● CHECKING</div>
+                <div class="status error" id="redisStatus">● CHECKING</div>
                 <p>Host: redis-master.5g-core.svc</p>
                 <span class="metric" id="redisMetric">—</span>
             </div>
@@ -113,6 +115,23 @@ HTML_DASHBOARD_TEMPLATE = """
     </div>
     
     <script>
+        function updateStatusElement(elementId, metricId, statusData) {
+            const statusEl = document.getElementById(elementId);
+            const metricEl = document.getElementById(metricId);
+            if (!statusEl) return;
+
+            if (statusData.status === "running" || statusData.status === "healthy" || statusData.status === "online") {
+                statusEl.className = "status running";
+                statusEl.textContent = "● " + statusData.status.toUpperCase();
+            } else {
+                statusEl.className = "status error";
+                statusEl.textContent = "● " + (statusData.status || "ERROR").toUpperCase();
+            }
+            if (metricEl && statusData.metric !== undefined) {
+                metricEl.textContent = statusData.metric;
+            }
+        }
+
         async function triggerMigration() {
             const randomUeId = "UE-" + Math.floor(Math.random() * 1000);
             await fetch('/trigger-migration', {
@@ -144,9 +163,8 @@ HTML_DASHBOARD_TEMPLATE = """
             try {
                 const response = await fetch('/health');
                 const data = await response.json();
-                document.getElementById('redisStatus').className = data.redis === 'connected' ? 'status running' : 'status error';
-                document.getElementById('redisStatus').textContent = '● ' + data.redis.toUpperCase();
                 output.textContent = '✅ Health Matrix Status:\\n' + JSON.stringify(data, null, 2);
+                await updateMetrics();
             } catch (error) {
                 output.textContent = '❌ Systems Check Unresponsive';
             }
@@ -156,7 +174,15 @@ HTML_DASHBOARD_TEMPLATE = """
             try {
                 const response = await fetch('/stats');
                 const data = await response.json();
+                
+                // Update modern dynamic metrics card states
+                updateStatusElement("coreStatus", "coreMetric", data.systems.core);
+                updateStatusElement("ricStatus", "ricMetric", data.systems.ric);
+                updateStatusElement("orchStatus", "orchMetric", data.systems.orchestrator);
+                updateStatusElement("redisStatus", "redisMetric", data.systems.redis);
+
                 document.getElementById('hitVal').textContent = data.latest_hit_ms;
+                document.getElementById('currentTime').textContent = "Last Updated: " + data.timestamp;
                 
                 const tbody = document.getElementById('historyBody');
                 tbody.innerHTML = '';
@@ -174,7 +200,7 @@ HTML_DASHBOARD_TEMPLATE = """
         }
 
         setInterval(updateMetrics, 2000);
-        window.onload = () => { checkHealth(); updateMetrics(); };
+        window.onload = () => { updateMetrics(); };
     </script>
 </body>
 </html>
