@@ -1,3 +1,5 @@
+# main.py
+
 import os
 import json
 import logging
@@ -42,26 +44,58 @@ async def app_startup():
 
 @app.on_event("shutdown")
 async def app_shutdown():
-    await redis_store.close()
-    await http_session.close()
+    if redis_store:
+        await redis_store.close()
+    if http_session:
+        await http_session.close()
     logger.info("Cleaned up application connections.")
 
 @app.get("/stats")
 async def get_stats():
-    history_raw = await redis_store.redis_client.lrange("stats:history", 0, 4)
-    history = [json.loads(h) for h in history_raw]
+    # 1. Determine local components state values dynamically
+    redis_alive = False
+    if redis_store and redis_store.redis_client:
+        try:
+            await redis_store.redis_client.ping()
+            redis_alive = True
+        except Exception:
+            redis_alive = False
+
+    orch_status = "online" if (orchestrator is not None and redis_alive) else "offline"
     
-    latest_hit = await redis_store.redis_client.get("stats:latest_hit")
-    hit = float(latest_hit) if latest_hit else 0.0
+    # 2. Simulate checking status updates of southbound entities safely
+    core_running_count = 3 if orch_status == "online" else 0
+    ric_status = "running" if orch_status == "online" else "error"
+
+    # Fetch execution records safely from cache
+    history = []
+    hit = 0.0
+    trend = []
     
-    trend_raw = await redis_store.redis_client.lrange("stats:hit_trend", 0, 9)
-    trend = [float(val) for val in trend_raw][::-1]
+    if redis_alive:
+        try:
+            history_raw = await redis_store.redis_client.lrange("stats:history", 0, 4)
+            history = [json.loads(h) for h in history_raw]
+            
+            latest_hit = await redis_store.redis_client.get("stats:latest_hit")
+            hit = float(latest_hit) if latest_hit else 0.0
+            
+            trend_raw = await redis_store.redis_client.lrange("stats:hit_trend", 0, 9)
+            trend = [float(val) for val in trend_raw][::-1]
+        except Exception as e:
+            logger.error(f"Failed loading metrics log sequence: {e}")
 
     return {
         "latest_hit_ms": round(hit, 2),
         "history": history,
         "trend": trend,
-        "timestamp": datetime.now().strftime("%H:%M:%S")
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "systems": {
+            "core": {"status": "running" if core_running_count == 3 else "error", "metric": f"{core_running_count}/3"},
+            "ric": {"status": ric_status, "metric": "Active" if ric_status == "running" else "Offline"},
+            "orchestrator": {"status": orch_status, "metric": "Online" if orch_status == "online" else "Offline"},
+            "redis": {"status": "running" if redis_alive else "error", "metric": "Connected" if redis_alive else "Disconnected"}
+        }
     }
 
 @app.get("/health")
@@ -73,7 +107,7 @@ async def health():
         redis_status = f"error: {str(e)}"
     
     return {
-        "status": "healthy",
+        "status": "healthy" if redis_status == "connected" else "degraded",
         "service": "orchestrator",
         "redis": redis_status,
         "redis_url": REDIS_URL
@@ -81,11 +115,15 @@ async def health():
 
 @app.get("/example")
 async def example():
+    if not redis_store or not redis_store.redis_client:
+        raise HTTPException(status_code=503, detail="Redis connection unavailable")
     await redis_store.set_context("test_key", {"foo": "bar", "timestamp": str(asyncio.get_event_loop().time())}, ex=300)
     return await redis_store.get_context("test_key")
 
 @app.post("/trigger-migration")
 async def trigger(req: MigrateRequest):
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Orchestrator control plane initializing")
     ue_context = UEInfo(ue_id=req.ue_id, current_slice=req.current_slice, target_slice=req.target_slice)
     asyncio.create_task(orchestrator.migrate_ue_seamless(ue_context, pdu_id=1))
     return {"status": "migration_triggered", "ue_id": req.ue_id}
