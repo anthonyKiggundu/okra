@@ -15,7 +15,8 @@ from clients import SliceClient, FlexRANClient, UPFClient
 from services import RedisStore, Orchestrator
 from dashboard import HTML_DASHBOARD_TEMPLATE
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis-master.5g-core.svc.cluster.local:6379")
+REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379")
+#os.getenv("REDIS_URL", "redis://redis-master.5g-core.svc.cluster.local:6379")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("orchestrator")
@@ -34,12 +35,19 @@ async def app_startup():
     await redis_store.connect()
     
     http_session = aiohttp.ClientSession()
-    slice_a = SliceClient("http://localhost:8001", http_session)
-    slice_b = SliceClient("http://localhost:8002", http_session)
-    flexran = FlexRANClient("http://localhost:9000", http_session)
-    upf = UPFClient("http://localhost:7000", http_session)
+    # Target your ACTUAL network management endpoints instead of generic localhosts
+    SLICE_A_URL = os.getenv("SLICE_A_URL", "http://192.168.56.101:8080") 
+    SLICE_B_URL = os.getenv("SLICE_B_URL", "http://192.168.56.102:8080")
+    FLEXRAN_URL = os.getenv("FLEXRAN_URL", "http://192.168.56.103:9000")
+    UPF_URL     = os.getenv("UPF_URL",     "http://192.168.56.104:7000")
+    
+    slice_a = SliceClient(SLICE_A_URL, http_session)
+    slice_b = SliceClient(SLICE_B_URL, http_session)
+    flexran = FlexRANClient(FLEXRAN_URL, http_session)
+    upf = UPFClient(UPF_URL, http_session)
     
     orchestrator = Orchestrator(slice_a, slice_b, redis_store, flexran, upf)
+    logger.info("Successfully bound orchestrator southbound integration modules.")
     logger.info(f"Connected to Redis at {REDIS_URL} and initialized runtime environment components.")
 
 @app.on_event("shutdown")
