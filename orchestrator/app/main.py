@@ -31,24 +31,39 @@ http_session: aiohttp.ClientSession = None
 @app.on_event("startup")
 async def app_startup():
     global redis_store, orchestrator, http_session
+    
+    # 1. Connect to Redis using the true cluster DNS string
     redis_store = RedisStore(REDIS_URL)
     await redis_store.connect()
     
     http_session = aiohttp.ClientSession()
-    # Target your ACTUAL network management endpoints instead of generic localhosts
-    SLICE_A_URL = os.getenv("SLICE_A_URL", "http://192.168.56.101:8080") 
-    SLICE_B_URL = os.getenv("SLICE_B_URL", "http://192.168.56.102:8080")
-    FLEXRAN_URL = os.getenv("FLEXRAN_URL", "http://192.168.56.103:9000")
-    UPF_URL     = os.getenv("UPF_URL",     "http://192.168.56.104:7000")
     
+    # 2. Map Slice Client Targets to the true Live Service Endpoints
+    # Standard format: http://<service-name>.<namespace>.svc.cluster.local:<port>
+    # Since both slices point to the same co-located cluster stack, we target the oai-smf service directly
+    #SLICE_A_URL = os.getenv("SLICE_A_URL", "http://10.42.0.229:80") #"http://oai-smf.oai-core.svc.cluster.local:8080")
+    #SLICE_B_URL = os.getenv("SLICE_B_URL", "http://10.42.0.229:80") #"http://oai-smf.oai-core.svc.cluster.local:8080")
+    # ✅ FIX: Target the oai-amf pod IP on port 8080 where the AMF SBI server listens
+    SLICE_A_URL = os.getenv("SLICE_A_URL", "http://10.42.0.201:8080")
+    SLICE_B_URL = os.getenv("SLICE_B_URL", "http://10.42.0.201:8080")
+
+    # Target the AMF on port 8080 (where its HTTP service listens)
+    # AMF_URL = "http://10.42.0.201:8080"
+    
+    # Update your UPF client address to match your discovered live endpoint tracking
+    UPF_URL = os.getenv("UPF_URL", "http://10.42.0.205:8805")
+    
+    # (If your FlexRIC/RAN intelligent controller sits in another namespace, leave it or update accordingly)
+    FLEXRAN_URL = os.getenv("FLEXRAN_URL", "http://flexric.5g-ric.svc.cluster.local:9000")
+    
+    # 3. Instantiate the execution loops safely
     slice_a = SliceClient(SLICE_A_URL, http_session)
     slice_b = SliceClient(SLICE_B_URL, http_session)
     flexran = FlexRANClient(FLEXRAN_URL, http_session)
     upf = UPFClient(UPF_URL, http_session)
     
     orchestrator = Orchestrator(slice_a, slice_b, redis_store, flexran, upf)
-    logger.info("Successfully bound orchestrator southbound integration modules.")
-    logger.info(f"Connected to Redis at {REDIS_URL} and initialized runtime environment components.")
+    logger.info("Orchestrator successfully aligned with verified oai-core network endpoints.")
 
 @app.on_event("shutdown")
 async def app_shutdown():
