@@ -3293,3 +3293,77 @@ std::string amf_application::amf_app::get_internal_api_token() const {
 const oai::config::amf_config& amf_application::amf_app::get_amf_config() const {
   return *amf_cfg;
 }
+
+// -------------------- Orchra -----------------------------
+
+bool amf_app::restore_ue_security_context(const std::string& supi, const std::string& kseaf_hex, const std::string& kamf_hex) {
+    // 1. Look up or allocate the blank NAS Context
+    std::shared_ptr<nas_context> nc = amf_app_inst->get_nas_context_by_supi(supi);
+    if (!nc) {
+        nc = std::make_shared<nas_context>();
+        nc->supi = supi;
+        // Bind to active context lists
+    }
+
+    // 2. Convert strings back to bytes
+    unsigned char* raw_kseaf = amf_conv::format_string_as_hex(kseaf_hex);
+    unsigned char* raw_kamf  = amf_conv::format_string_as_hex(kamf_hex);
+
+    // 3. Force Memory Injection
+    memcpy(nc->_5g_av[0].kseaf, raw_kseaf, 32);
+    memcpy(nc->kamf[0], raw_kamf, 32);
+
+    // 4. Force Security State machine to bypass 5G-AKA challenge
+    nas_sec_ctx s_ctx = {};
+    s_ctx.vector_pointer = 0;
+    s_ctx.nas_initial_count = 0; // Synchronize with your stored snapshot count!
+    nc->security_ctx = s_ctx; 
+
+    // 5. Re-derive NAS internal keys using the hijacked Kamf
+    // This allows target AMF to encrypt outbound control plane signals safely
+    nas_algorithms::derive_knas_all(nc); 
+
+    oai::utils::utils::free_wrapper((void**) &raw_kseaf);
+    oai::utils::utils::free_wrapper((void**) &raw_kamf);
+    return true;
+}
+
+bool amf_app::restore_ue_context_from_snapshot(const OrchraUeContextSnapshot& snap) {
+    Logger::amf_app().info("Executing runtime context restore for SUPI: %s", snap.supi.c_str());
+
+    // 1. Core security context initialization (Your existing function)
+    // This loads kseaf, kamf, and derives Knas_enc/Knas_int
+    if (!this->restore_ue_security_context(snap.supi, snap.kseaf_hex, snap.kamf_hex)) {
+        Logger::amf_app().error("Crypto core engine rejected security parameter generation");
+        return false;
+    }
+
+    std::shared_ptr<nas_context> nc = this->get_nas_context_by_supi(snap.supi);
+    if (!nc) return false;
+
+    // 2. Identifier Mapping & Map Registration
+    // Force binding of runtime state flags so the AMF treats this UE as active
+    nc->member_state = NAS_CONNECTED;
+
+    // Bind the context inside the global lookup tables so subsequent gNB/Sbi messages map here
+    this->set_nas_context_by_supi(snap.supi, nc);
+
+    // 3. Connect to the active access infrastructure (gNodeB linking)
+    // Map the tracking indicators to point to the pre-arranged migration target tunnel
+    if (snap.ran_ue_ngap_id > 0) {
+        nc->ran_ue_ngap_id = snap.ran_ue_ngap_id;
+
+        std::shared_ptr<ue_context> uc = this->get_ue_context_by_ran_ue_ngap_id(snap.ran_ue_ngap_id);
+        if (uc) {
+            uc->nas_ctx = nc; // Establish explicit cross-reference linking
+            Logger::amf_app().debug("Successfully cross-linked NAS context with target NGAP parameters");
+        }
+    }
+
+    // 4. Step F: Queue the follow-up NAS action
+    // Send an out-of-band message to the UE to force NAS sequence synchronization
+    this->trigger_nas_count_resynchronization(nc);
+
+    return true;
+}
+// ------------------------ end of Orchra ------------------
