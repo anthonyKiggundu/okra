@@ -53,7 +53,7 @@ pip install fastapi uvicorn aiohttp redis async-timeout pydantic
 By default, the app uses:
 
 ```bash
-redis://redis-master.5g-core.svc.cluster.local:6379
+redis://redis-master.oai-core.svc.cluster.local:6379
 ```
 
 For local development, override it:
