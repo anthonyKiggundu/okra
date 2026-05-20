@@ -1,6 +1,8 @@
 # Okra Orchestrator API: 
 
-[!NOTE] This repository is still under setup
+> [!NOTE]
+> This repository is still under setup!
+
 `orchestrator/app/main.py` is the entry point for the Okra REST API used for session migration and inter-slice orchestration.
 
 It is a FastAPI service that:
