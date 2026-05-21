@@ -3295,75 +3295,154 @@ const oai::config::amf_config& amf_application::amf_app::get_amf_config() const 
 }
 
 // -------------------- Orchra -----------------------------
+static bool hex_to_bytes_32(const std::string& hex, uint8_t* out) {
+    if (!out || hex.size() != 64) return false;
 
-bool amf_app::restore_ue_security_context(const std::string& supi, const std::string& kseaf_hex, const std::string& kamf_hex) {
-    // 1. Look up or allocate the blank NAS Context
-    std::shared_ptr<nas_context> nc = amf_app_inst->get_nas_context_by_supi(supi);
+    auto hex_val = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+
+    for (size_t i = 0; i < 32; ++i) {
+        int hi = hex_val(hex[2 * i]);
+        int lo = hex_val(hex[2 * i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+    return true;
+}
+
+bool amf_app::restore_ue_security_context(
+    const std::string& supi,
+    const std::string& kseaf_hex,
+    const std::string& k_amf_hex,
+    uint32_t ul_nas_count,
+    uint32_t dl_nas_count,
+    const std::shared_ptr<::nas_context>& nc) {
+
+    Logger::amf_app().info("Restoring security context parameters for SUPI: %s", supi.c_str());
+
     if (!nc) {
-        nc = std::make_shared<nas_context>();
-        nc->supi = supi;
-        // Bind to active context lists
+        Logger::amf_app().error("NAS context is null for SUPI: %s", supi.c_str());
+        return false;
     }
 
-    // 2. Convert strings back to bytes
-    unsigned char* raw_kseaf = amf_conv::format_string_as_hex(kseaf_hex);
-    unsigned char* raw_kamf  = amf_conv::format_string_as_hex(kamf_hex);
+    if (kseaf_hex.size() != 64 || k_amf_hex.size() != 64) {
+        Logger::amf_app().error("Invalid key length for SUPI %s", supi.c_str());
+        return false;
+    }
 
-    // 3. Force Memory Injection
-    memcpy(nc->_5g_av[0].kseaf, raw_kseaf, 32);
-    memcpy(nc->kamf[0], raw_kamf, 32);
+    if (!hex_to_bytes_32(kseaf_hex, nc->_5g_av[0].kseaf)) {
+        Logger::amf_app().error("Failed to decode KSEAF for SUPI %s", supi.c_str());
+        return false;
+    }
 
-    // 4. Force Security State machine to bypass 5G-AKA challenge
-    nas_sec_ctx s_ctx = {};
-    s_ctx.vector_pointer = 0;
-    s_ctx.nas_initial_count = 0; // Synchronize with your stored snapshot count!
-    nc->security_ctx = s_ctx; 
+    if (!hex_to_bytes_32(k_amf_hex, nc->kamf[0])) {
+        Logger::amf_app().error("Failed to decode KAMF for SUPI %s", supi.c_str());
+        return false;
+    }
 
-    // 5. Re-derive NAS internal keys using the hijacked Kamf
-    // This allows target AMF to encrypt outbound control plane signals safely
-    nas_algorithms::derive_knas_all(nc); 
+    nc->security_ctx.emplace();
+    nc->security_ctx->vector_pointer = 0;
 
-    oai::utils::utils::free_wrapper((void**) &raw_kseaf);
-    oai::utils::utils::free_wrapper((void**) &raw_kamf);
+    // For Uplink Count
+    nc->security_ctx->ul_count.seq_num  = (ul_nas_count & 0x00FF);        // Lower 8 bits (Sequence Number)
+    nc->security_ctx->ul_count.overflow = (ul_nas_count >> 8) & 0x00FFFFFF; // Upper 24 bits (Overflow)
+
+    // For Downlink Count
+    nc->security_ctx->dl_count.seq_num  = (dl_nas_count & 0x00FF);        // Lower 8 bits
+    nc->security_ctx->dl_count.overflow = (dl_nas_count >> 8) & 0x00FFFFFF; // Upper 24 bits
+									//
+    nc->is_auth_vectors_present = true;
+    nc->is_current_security_available = true;
+
+    Logger::amf_app().info("Security context successfully assigned for SUPI: %s", supi.c_str());
     return true;
 }
 
 bool amf_app::restore_ue_context_from_snapshot(const OrchraUeContextSnapshot& snap) {
-    Logger::amf_app().info("Executing runtime context restore for SUPI: %s", snap.supi.c_str());
+    Logger::amf_app().info(
+        "Executing runtime context restore for SUPI: %s", snap.supi.c_str());
 
-    // 1. Core security context initialization (Your existing function)
-    // This loads kseaf, kamf, and derives Knas_enc/Knas_int
-    if (!this->restore_ue_security_context(snap.supi, snap.kseaf_hex, snap.kamf_hex)) {
-        Logger::amf_app().error("Crypto core engine rejected security parameter generation");
+    if (!amf_n1_inst) {
+        Logger::amf_app().error("amf_n1_inst is null");
         return false;
     }
 
-    std::shared_ptr<nas_context> nc = this->get_nas_context_by_supi(snap.supi);
-    if (!nc) return false;
+    std::shared_ptr<nas_context> nc = nullptr;
 
-    // 2. Identifier Mapping & Map Registration
-    // Force binding of runtime state flags so the AMF treats this UE as active
-    nc->member_state = NAS_CONNECTED;
+    // 1. Find or create NAS context
+    if (!amf_n1_inst->supi_2_nas_context(snap.supi, nc) || !nc) {
+        nc = std::make_shared<nas_context>();
+        if (!nc) {
+            Logger::amf_app().error(
+                "Failed to allocate nas_context for SUPI: %s", snap.supi.c_str());
+            return false;
+        }
 
-    // Bind the context inside the global lookup tables so subsequent gNB/Sbi messages map here
-    this->set_nas_context_by_supi(snap.supi, nc);
-
-    // 3. Connect to the active access infrastructure (gNodeB linking)
-    // Map the tracking indicators to point to the pre-arranged migration target tunnel
-    if (snap.ran_ue_ngap_id > 0) {
+        nc->supi = snap.supi;
+        nc->amf_ue_ngap_id = snap.amf_ue_ngap_id;
         nc->ran_ue_ngap_id = snap.ran_ue_ngap_id;
 
-        std::shared_ptr<ue_context> uc = this->get_ue_context_by_ran_ue_ngap_id(snap.ran_ue_ngap_id);
-        if (uc) {
-            uc->nas_ctx = nc; // Establish explicit cross-reference linking
-            Logger::amf_app().debug("Successfully cross-linked NAS context with target NGAP parameters");
+        amf_n1_inst->set_supi_2_nas_context(snap.supi, nc);
+
+        if (snap.amf_ue_ngap_id != 0) {
+            amf_n1_inst->set_amf_ue_ngap_id_2_nas_context(
+                snap.amf_ue_ngap_id, nc);
+        }
+    } else {
+        nc->supi = snap.supi;
+        nc->amf_ue_ngap_id = snap.amf_ue_ngap_id;
+        nc->ran_ue_ngap_id = snap.ran_ue_ngap_id;
+    }
+
+    // 2. Restore security parameters
+    if (!restore_ue_security_context(
+            snap.supi, snap.kseaf, snap.kamf,
+            snap.ul_nas_count, snap.dl_nas_count, nc)) {
+        Logger::amf_app().error(
+            "Stage 1 migration failure: Security context instantiation broke for SUPI %s",
+            snap.supi.c_str());
+        return false;
+    }
+
+    if (!amf_n2_inst->restore_ue_ngap_context_from_snapshot(snap)) {
+        Logger::amf_app().error(
+           "Stage 2 migration failed: NGAP context recovery aborted");
+        return false;
+    }
+
+    // 3. Find or create UE context
+    std::shared_ptr<ue_context> uc = nullptr;
+    if (!amf_n1_inst->find_ue_context(
+            snap.ran_ue_ngap_id, snap.amf_ue_ngap_id, uc) || !uc) {
+        uc = std::make_shared<ue_context>();
+        if (!uc) {
+            Logger::amf_app().error(
+                "Failed to allocate ue_context for SUPI: %s", snap.supi.c_str());
+            return false;
         }
     }
 
-    // 4. Step F: Queue the follow-up NAS action
-    // Send an out-of-band message to the UE to force NAS sequence synchronization
-    this->trigger_nas_count_resynchronization(nc);
+    uc->supi           = snap.supi;
+    uc->ran_ue_ngap_id = snap.ran_ue_ngap_id;
+    uc->amf_ue_ngap_id = snap.amf_ue_ngap_id;
 
+    // 4. Restore NAS state
+    nc->supi        = snap.supi;
+    nc->nas_status  = CM_CONNECTED;
+    nc->_5gmm_state = _5GMM_REGISTERED;
+
+    // 5. Restore N1 maps
+    amf_n1_inst->set_supi_2_nas_context(snap.supi, nc);
+    amf_n1_inst->set_supi_2_amf_id(snap.supi, snap.amf_ue_ngap_id);
+    amf_n1_inst->set_supi_2_ran_id(snap.supi, snap.ran_ue_ngap_id);
+
+    Logger::amf_app().info(
+        "Context snapshot processing completely initialized for SUPI: %s",
+        snap.supi.c_str());
     return true;
 }
 // ------------------------ end of Orchra ------------------

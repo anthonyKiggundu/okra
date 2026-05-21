@@ -2223,8 +2223,8 @@ void amf_sbi::handle_migration_restore_request(const nlohmann::json& request_bod
         // 2. Hydrate our local C++ Snapshot structure from the JSON boundaries
         OrchraUeContextSnapshot snap;
         snap.supi = request_body["supi"].get<std::string>();
-        snap.kseaf_hex = request_body["kseaf"].get<std::string>();
-        snap.kamf_hex = request_body["kamf"].get<std::string>();
+        snap.kseaf = request_body["kseaf"].get<std::string>();
+        snap.kamf = request_body["kamf"].get<std::string>();
         
         // Extract routing and context data if present
         if (request_body.contains("ran_ue_ngap_id")) {

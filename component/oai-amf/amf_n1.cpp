@@ -67,7 +67,8 @@
 #include "sha256.hpp"
 #include "utils.hpp"
 #include "AuthenticationReject.hpp"
-#include "../../oai-core-smf/src/smf_app/orchra_context.hpp"
+#include "orchra_context.hpp"
+#include "orchra_redis.hpp"
 
 using namespace amf_application;
 using namespace boost::placeholders;
@@ -6297,11 +6298,13 @@ void amf_app::trigger_nas_count_resynchronization(std::shared_ptr<nas_context>& 
     // nas_payload = nas_encoding::encode_configuration_update_command(nc);
 
     // 2. Step G: Package as an ITTI downlink transport task
-    auto itti_msg = std::make_shared<itti_downlink_nas_transport>(TASK_AMF_APP, TASK_AMF_N2);
+    // auto itti_msg = std::make_shared<itti_downlink_nas_transport>(TASK_AMF_APP, TASK_AMF_N2);
+    auto itti_msg = std::make_shared<itti_downlink_nas_transfer>(TASK_AMF_APP, TASK_AMF_N2);
 
     itti_msg->ran_ue_ngap_id = nc->ran_ue_ngap_id;
     itti_msg->amf_ue_ngap_id = nc->amf_ue_ngap_id;
-    itti_msg->nas_pdu        = nas_payload;
+    // itti_msg->dl_nas = bstrcpy(nas_payload);
+    itti_msg->dl_nas = bstrcpy(nas_payload);
 
     // 3. Post to the communication bus
     int send_rc = itti_inst->send_msg(itti_msg);

@@ -44,11 +44,15 @@
 #include "uint_generator.hpp"
 #include "StatusChange.h"
 
+#include "orchra_context.hpp"
+
 // ... ensure amf_config is visible
 namespace oai::config { class amf_config; }
 
 using namespace oai::config;
 using namespace oai::_3gpp::model;
+
+class nas_context;
 
 namespace amf_application {
 
@@ -965,8 +969,25 @@ class amf_app {
   const oai::config::amf_config& get_amf_config() const; // { return *amf_cfg; }
 							 //
   // --------------- more Orchra ---------------------------
-  bool restore_ue_security_context(const std::string& supi, const std::string& kseaf_hex, const std::string& kamf_hex);
+  // bool restore_ue_security_context(const std::string& supi, const std::string& kseaf_hex, const std::string& kamf_hex);
+  //bool restore_ue_security_context(
+  //  const std::string& supi, 
+  //  const std::string& kseaf_hex, 
+  //  const std::string& kamf_hex, 
+  //  uint32_t vector_pointer,
+  //  uint32_t ul_nas_count,
+  //  uint32_t dl_nas_count);
+
+  // bool restore_ue_security_context(const OrchraUeContextSnapshot& snap, const std::shared_ptr<nas_context>& nc);
+  bool restore_ue_security_context(
+    const std::string& supi,
+    const std::string& kseaf_hex,
+    const std::string& kamf_hex,
+    uint32_t ul_nas_count,
+    uint32_t dl_nas_count,
+    const std::shared_ptr<nas_context>& nc);
   bool restore_ue_context_from_snapshot(const OrchraUeContextSnapshot& snap);
+  void trigger_nas_count_resynchronization(std::shared_ptr<nas_context>& nc);
   // ----------------- end of Orchra -----------------------
 };
 
