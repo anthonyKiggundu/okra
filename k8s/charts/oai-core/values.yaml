@@ -1,7 +1,13 @@
 # OAI core chart values (updated)
 # Chart-wide defaults
-namespace: 5g-core # default
+namespace: oai-core
 replicaCount: 1
+
+global:
+  namespace: oai-core
+  imagePullPolicy: IfNotPresent
+  domain: cluster.local
+  environment: production
 
 # -----------------------------------------------------------------------------
 # UPF (user plane)
@@ -23,13 +29,14 @@ upf:
   n3InterfaceName: "eth0"  # GTP-U interface
   n4InterfaceName: "eth0"  # PFCP interface
   n6InterfaceName: "eth0"  # Data network interface
-  n4NodeId: "127.0.0.1"    # PFCP node ID
-  n6Gateway: "192.168.70.201"  # Adjust to your network
+  n4NodeId: "oai-upf.oai-core.svc.cluster.loca" #"10.42.0.233"    # PFCP node ID
+    #n6Gateway: "192.168.70.201"  # Adjust to your network
 
   # Service configuration
   service:
     type: ClusterIP
-
+  
+  nrfUri: "http://oai-nrf.oai-core.svc.cluster.local:8080"
   # Optional resource requests/limits
   resources: {}
 
@@ -37,51 +44,271 @@ upf:
 # SMF (session management / control plane)
 # -----------------------------------------------------------------------------
 smf:
-  image: "oaisoftwarealliance/oai-smf" #"openairinterface/oai-smf:latest"
+  image: "ghcr.io/anthonykiggundu/oai-smf:internal-api-20260511-1553" #"oaisoftwarealliance/oai-smf"
 
-  # Service-based interface (SBI) typically HTTPS/TCP. Change if your SMF
-  # listens on a different port.
-  sbiPort: 443
-
-  # Optional metrics port (TCP). Set to null to disable.
+  sbiPort: 8080
   metricsPort: 9100
-
+    #n4NodeId: "oai-smf" #"10.42.0.232"
   service:
     type: ClusterIP
-
+  securityContext:
+    privileged: true
   resources: {}
+
+  plmn_list:
+    - mcc: "208"
+      mnc: "95"
+  gnb_list:
+    - tac: 40960
+
+  config:
+    enabled: true
+    mountPath: /openair-smf/etc/config.yaml
+    content: |
+      log_level:
+        general: info
+        smf_app: info
+        smf_n4: info
+
+      http_version: 2
+
+      nfs:
+        smf:
+          host: oai-smf
+          sbi:
+            addr4: "0.0.0.0"
+            port: 8080
+            api_version: v1
+
+              #n4:
+              #addr4: "0.0.0.0" #"10.42.0.232"
+              #port: 8805
+              #mtu: 1450
+              #node_id: "oai-smf" #"10.42.0.232"
+
+        nrf:
+          host: oai-nrf
+          sbi:
+            port: 8080
+            api_version: v1
+
+      upfs:
+        - host: "oai-upf.oai-core.svc.cluster.local"
+          config:
+            enable_usage_reporting: no
+          node_id: "oai-upf.oai-core.svc.cluster.local"
+          addr4: "oai-upf.oai-core.svc.cluster.local"
+          port: 8805
+
+      dnns:
+        - dnn: "internet"
+          pdu_session_type: "IPV4"
+          ipv4_pool: "12.1.1.151 - 12.1.1.253"
+        - dnn: "oai.ipv4"
+          pdu_session_type: "IPV4"
+          ipv4_pool: "12.1.1.51 - 12.1.1.150"
+        - dnn: "default"
+          pdu_session_type: "IPV4"
+          ipv4_pool: "12.1.1.2 - 12.1.1.50"
+        - dnn: "ims"
+          pdu_session_type: "IPV4"
+          ipv4_pool: "14.1.1.2 - 14.1.1.253"
+
+  nrf_uri: "http://oai-nrf.oai-core.svc.cluster.local:8080"
 
 # -----------------------------------------------------------------------------
 # AMF (access and mobility management function)
 # -----------------------------------------------------------------------------
 amf:
-  image: "oaisoftwarealliance/oai-amf:latest" #"openairinterface/amf:latest"
+  image: ghcr.io/anthonykiggundu/oai-amf:internal-api-20260317-1107
 
-  # NGAP (between AMF and gNB) uses SCTP on port 38412 by default for OAI.
+  extraEnv:
+    - name: NRF_PORT
+      value: "8080"
+    - name: NRF_FQDN
+      value: "oai-nrf.oai-core.svc.cluster.local"
+    - name: NF_REGISTRATION
+      value: "yes"
+    - name: EXTERNAL_NRF
+      value: "yes"
+    - name: USE_HTTP2
+      value: "yes"
+    - name: HTTP_VERSION
+      value: "2"
+    - name: NRF_URI
+      value: "http://oai-nrf.oai-core.svc.cluster.local:8080"
+
+  config:
+    enabled: true
+    log_level:
+      general: debug
+      amf_app: debug
+      amf_ngap: debug
+      amf_sbi: debug
+      #warning
+    mountPath: /openair-amf/etc/amf.yaml
+    content: |
+      support_features:
+        use_http2: yes
+      amf:
+        host: oai-amf
+        realm: openairinterface.org
+        selected_network_functions:
+          - nrf
+          - ausf
+          - udm
+        nrf_uri: "http://oai-nrf.oai-core.svc.cluster.local:8080"
+        ausf:
+          host: oai-ausf
+          port: 8080
+          api_version: v1
+        udm:
+          host: oai-udm
+          port: 80
+          api_version: v1
+            #udr:
+            #host: oai-udr
+            #sbi:
+            #port: 80
+            #api_version: v1
+            #upf:
+            #host: oai-upf
+            #pfcpPort: 8805
+            #service:
+            #type: ClusterIP
+
+            #plmn_list:
+            #- mcc: 208
+            #mnc: 95
+            #tac: 1
+            #s_nssai_list:
+            #  - sst: 1
+            #    sd: "000001"
+
+        served_guami_list:
+          - mcc: 208
+            mnc: 95
+            amf_region_id: 1
+            amf_set_id: 1
+            amf_pointer: 1
+        plmn_support_list:
+          - mcc: 208
+            mnc: 95
+            tac: 40960
+            nssai:
+              - sst: 1
+                sd: "000001" 
+
   ngapPort: 38412
-
-  # AMF service-based interface (SBI) usually HTTPS/TCP.
-  sbiPort: 443
-
-  # Optional metrics port (TCP). Set to null to disable.
+  sbiPort: 8080
   metricsPort: 9100
+  service:
+    type: ClusterIP
+  internal_api:
+    enabled: true
+    token: "change-me"
+  resources: {}
+
+#------------------------------------------------------------------------------
+#  NRF helm setup ()
+#------------------------------------------------------------------------------
+oai-nrf:
+  enabled: true
+
+  image:
+    # you can keep registry separate if you want, but your templates currently use repository:tag
+    repository: oaisoftwarealliance/oai-nrf #ghcr.io/anthonykiggundu/oai-nrf
+    tag: "latest"
+    pullPolicy: IfNotPresent
 
   service:
     type: ClusterIP
+    sbi:
+      port: 8080
+
+  config:
+    enabled: true
+    mountPath: /openair-nrf/etc/config.yaml
+    content: |
+      log_level:
+        general: warning #debug
+      register_nf:
+        general: no
+      http_version: 2
+      nfs:
+        nrf:
+          host: oai-nrf.oai-core.svc.cluster.local
+          sbi:
+            port: 8080
+            api_version: v1
+            interface_name: eth0
 
   resources: {}
+
+# Unified Data Repository Configuration
+udr:
+  enabled: true
+  image:
+    repository: oaisoftwarealliance/oai-udr
+    tag: v2.0.0
+  config:
+    instance: "0"
+    pidDirectory: "/var/run"
+    udrInterfaceNameForNudr: "eth0"
+    udrPortForNudr: 80
+    # Database Settings (Assumes a MySQL service is running)
+    mysqlIpv4Address: "oai-mysql"
+    mysqlUser: "testuser"
+    mysqlPass: "testpass"
+    mysqlDb: "oai_db"
+
+# Unified Data Management Configuration
+udm:
+  enabled: true
+  image:
+    repository: oaisoftwarealliance/oai-udm
+    tag: v2.0.0
+  config:
+    instance: "0"
+    pidDirectory: "/var/run"
+    udmInterfaceNameForNudr: "eth0"
+    udmInterfaceNameForNudm: "eth0"
+    udmPortForNudm: 80
+    # Pointing to the UDR Service
+    udrIpAddress: "oai-udr"
+    udrPort: 80
+
+# Authentication Server Function Configuration
+ausf:
+  enabled: true
+  image:
+    repository: oaisoftwarealliance/oai-ausf
+    tag: v2.0.0
+  config:
+    instance: "0"
+    pidDirectory: "/var/run"
+    ausfInterfaceNameForNausf: "eth0"
+    ausfPortForNausf: 80
+    # Pointing to the UDM Service
+    udmIpAddress: "oai-udm"
+    udmPort: 80
+
+# Common Network Settings
+network:
+  mtu: 1500
+  mcc: "208"
+  mnc: "95"
 
 # -----------------------------------------------------------------------------
 # Common / misc
 # -----------------------------------------------------------------------------
 imagePullSecrets: []
-global: {}
 
 # Orchestrator & sidecar values (append or merge into existing values)
 orchestrator:
   image:
-    repository: ghcr.io/anthonykiggundu/orchestrator   # set to your built image
-    tag: "latest"
+    repository: ghcr.io/anthonykiggundu/slice-orchestrator
+    tag: "v4"
     pullPolicy: IfNotPresent
   replicas: 1
   service:
@@ -91,24 +318,14 @@ orchestrator:
   ranNotifyUrl: ""  # e.g. http://flexran-controller.namespace.svc.cluster.local:8080/notify
   upfNotifyUrl: ""  # e.g. http://oai-upf.namespace.svc.cluster.local:8080/notify
 
-    #sidecar:
-    #  replicas: 1
-    #  port: 8080
-    #image:
-    #repository: ghcr.io/anthonykiggundu/okra-context-adapter  # set to your built sidecar image
-    #tag: latest
-    #pullPolicy: IfNotPresent
-    #  resources:
-    #requests:
-    #  memory: "128Mi"
-    #  cpu: "250m"
-    #limits:
-    #  memory: "256Mi"
-    #  cpu: "500m"
-global:
-  environment: production
-
 # Redis (minimal settings; you may already have a redis chart/helmfile)
 redis:
-  url: "redis://redis-master.5g-core.svc.cluster.local:6379/0" #"redis://redis-master.5g.svc.cluster.local:6379/0"
+  url: "redis://redis-master.oai-core.svc.cluster.local:6379/0" #"redis://redis-master.5g.svc.cluster.local:6379/0"
 
+# Another instance of mysql for the new smf/amf
+mysql:
+  host: oai-mysql
+  port: 3306
+  user: oai
+  password: testpw
+  database: oai_db
