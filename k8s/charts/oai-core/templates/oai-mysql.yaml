@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oai-mysql-secret
+  namespace: oai-core
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "root"
+  MYSQL_DATABASE: "oai_db"
+  MYSQL_USER: "oai"
+  MYSQL_PASSWORD: "oai"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oai-mysql-pvc
+  namespace: oai-core
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-mysql
+  namespace: oai-core
+spec:
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+  selector:
+    app: oai-mysql
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-mysql
+  namespace: oai-core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oai-mysql
+  template:
+    metadata:
+      labels:
+        app: oai-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          envFrom:
+            - secretRef:
+                name: oai-mysql-secret
+          volumeMounts:
+            - name: mysql-persistent-storage #data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: mysql-persistent-storage #data
+          persistentVolumeClaim:
+            claimName: oai-mysql-pvc

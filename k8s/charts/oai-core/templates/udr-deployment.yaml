@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-udr
+  labels:
+    app.kubernetes.io/name: oai-udr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-udr
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oai-udr
+    spec:
+      containers:
+        - name: udr
+          image: oaisoftwarealliance/oai-udr:v2.0.0
+          env:
+            - name: TZ
+              value: "Europe/Paris"
+            - name: UDR_INTERFACE_NAME_FOR_NUDR
+              value: "eth0"
+            - name: MYSQL_IPV4_ADDRESS
+              value: "mysql"
+            - name: MYSQL_USER
+              value: "oai"
+            - name: MYSQL_PASS
+              value: "oai"
+            - name: MYSQL_DB
+              value: "oai_db"
+          ports:
+            - containerPort: 80
+              name: http
