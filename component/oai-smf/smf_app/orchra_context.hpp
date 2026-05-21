@@ -16,6 +16,8 @@ namespace oai {
   }
 }
 
+class nas_context;
+
 struct OrchraUeContextSnapshot {
   std::string context_id;
   std::string trace_id;
@@ -35,8 +37,20 @@ struct OrchraUeContextSnapshot {
   // --- Add these for "Seamless" Security Sync ---
   uint32_t dl_nas_count;     // Downlink NAS Sequence Number
   uint32_t ul_nas_count;     // Uplink NAS Sequence Number
-  std::string k_amf;         // Security Anchor Key (Hex string)
+  uint32_t vector_pointer{0};
+  std::string kamf;         // Security Anchor Key (Hex string)
   std::string kseaf;   // hex string
+  uint64_t ran_ue_ngap_id;
+  uint64_t amf_ue_ngap_id;
+
+  int gnb_assoc_id;
+  int sctp_stream_recv;
+  int sctp_stream_send;
+  bool ue_context_request;
+  uint8_t ncc;
+  
+  uint32_t target_ran_ue_ngap_id;
+  int target_gnb_assoc_id;
 
   std::string upf_node_id;
   std::string upf_n4_addr;
@@ -53,6 +67,11 @@ OrchraUeContextSnapshot snapshot_from_smf_context(
       std::shared_ptr<oai::app::smf::smf_context> ctx,
       const std::string& kseaf_hex = {},
       const std::string& kamf_hex = {});
+
+OrchraUeContextSnapshot snapshot_from_nas_context(
+    std::shared_ptr<nas_context> ctx,
+    const std::string& kseaf_hex = {},
+    const std::string& kamf_hex = {});
 
 void apply_snapshot_to_smf_context(
      const OrchraUeContextSnapshot& snap, 

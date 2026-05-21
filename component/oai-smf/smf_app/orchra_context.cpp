@@ -36,7 +36,10 @@ void to_json(json& j, const OrchraUeContextSnapshot& s) {
     // New Security/NAS state
     {"dl_nas_count", s.dl_nas_count},
     {"ul_nas_count", s.ul_nas_count},
-    {"k_amf", s.k_amf},
+    {"kamf", s.kamf},
+    {"vector_pointer", s.vector_pointer},
+    {"kseaf", s.kseaf},
+    {"ran_ue_ngap_id", s.ran_ue_ngap_id},
 
     {"upf_node_id", s.upf_node_id},
     {"upf_n4_addr", s.upf_n4_addr},
@@ -59,7 +62,10 @@ void from_json(const nlohmann::json& j, OrchraUeContextSnapshot& s) {
   // New Security/NAS state (with safe defaults)
   s.dl_nas_count   = j.value("dl_nas_count", 0u);
   s.ul_nas_count   = j.value("ul_nas_count", 0u);
-  s.k_amf         = j.value("k_amf", "");
+  s.kamf         = j.value("kamf", "");
+  s.vector_pointer = j.value("vector_pointer", 0u);
+  s.kseaf          = j.value("kseaf", "");
+  s.ran_ue_ngap_id = j.value("ran_ue_ngap_id", 0ull);
 
   s.upf_node_id = j.value("upf_node_id", "");
   s.upf_n4_addr = j.value("upf_n4_addr", "");
@@ -68,7 +74,8 @@ void from_json(const nlohmann::json& j, OrchraUeContextSnapshot& s) {
 }
 
 OrchraUeContextSnapshot snapshot_from_smf_context(
-    std::shared_ptr<oai::app::smf::smf_context> ctx) {
+    std::shared_ptr<oai::app::smf::smf_context> ctx,
+    const std::string& kseaf_hex, const std::string& kamf_hex ) {
   OrchraUeContextSnapshot s{};
 
   if (!ctx) {
@@ -102,17 +109,19 @@ OrchraUeContextSnapshot snapshot_from_smf_context(
     struct in_addr ue_ipv4 = session->ipv4_address;
     // s.ip = ipv4_to_string(ue_ipv4);
     s.ip = inet_ntoa(ue_ipv4);
+
+    s.upf_seid = session->up_fseid.seid;
+    s.upf_teid = session->up_fseid.teid;
+    s.upf_n4_addr = ipv4_to_string(session->up_fseid.ipv4_address);
+
   }
 
   // These are not publicly exposed in your tree; keep them empty/zero.
-  s.trace_id = {};
-  s.upf_node_id = {};
-  s.upf_n4_addr = {};
+  //s.trace_id = {};
+  //s.upf_node_id = {};
+  //s.upf_n4_addr = {};
   //s.upf_seid = 0;
   //s.upf_teid = 0;
-   s.upf_seid = session->up_fseid.seid;
-   s.upf_teid = session->up_fseid.teid;
-   s.upf_n4_addr = ipv4_to_string(session->up_fseid.ipv4_address);
 
   s.kseaf = kseaf_hex;
   s.kamf = kamf_hex;
@@ -122,6 +131,48 @@ OrchraUeContextSnapshot snapshot_from_smf_context(
       s.supi.c_str(), s.pdu_session_id);
 
   return s;
+}
+
+OrchraUeContextSnapshot snapshot_from_nas_context(
+    std::shared_ptr<nas_context> ctx,
+    const std::string& kseaf_hex,
+    const std::string& kamf_hex) 
+{
+    OrchraUeContextSnapshot snap{};
+    if (!ctx) {
+        return snap;
+    }
+
+    // 1. Populate basic subscriber details
+    snap.supi = ctx->supi;
+    snap.context_id = ctx->supi; // AMF looks up primarily by SUPI/IMSI
+
+    // 2. Populate Security Context details if initialized
+    if (ctx->security_ctx.has_value()) {
+        // Reconstruct flat 32-bit integer counters from the split structure format
+        snap.ul_nas_count = (ctx->security_ctx->ul_count.overflow << 8) | 
+                             ctx->security_ctx->ul_count.seq_num;
+        snap.dl_nas_count = (ctx->security_ctx->dl_count.overflow << 8) | 
+                             ctx->security_ctx->dl_count.seq_num;
+        
+        // Retain tracking indices for authentication vectors
+        snap.vector_pointer = ctx->security_ctx->vector_pointer;
+    } else {
+        snap.ul_nas_count = 0;
+        snap.dl_nas_count = 0;
+        snap.vector_pointer = 0;
+    }
+
+    // 3. Unpack and assign generated key parameters passed from the AKA procedure
+    snap.kseaf = kseaf_hex;
+    snap.kamf  = kamf_hex;
+
+    Logger::amf_n1().info(
+        "ORCHRA: NAS Snapshot created for SUPI: %s | UL-NAS: %u | DL-NAS: %u",
+        snap.supi.c_str(), snap.ul_nas_count, snap.dl_nas_count
+    );
+
+    return snap;
 }
 
 void apply_snapshot_to_smf_context(const OrchraUeContextSnapshot& s,
@@ -171,37 +222,3 @@ void apply_snapshot_to_smf_context(const OrchraUeContextSnapshot& s,
                             s.pdu_session_id, s.supi.c_str());
 }
 
-/*
-void apply_snapshot_to_smf_context(const OrchraUeContextSnapshot& s, 
-                                   std::shared_ptr<oai::app::smf::smf_context> ctx) {
-    
-    // 1. Locate the existing session
-    auto session = ctx->get_session_ptr(s.pdu_session_id);
-    if (!session) {
-        Logger::smf_app().error("ORCHRA: Cannot apply snapshot, session %u not found", s.pdu_session_id);
-        return;
-    }
-
-    // 2. Apply Basic Data
-    session->set_dnn(s.dnn);
-    session->set_snssai(s.sst, s.sd);
-
-    // 3. Apply IPv4 (String to struct in_addr)
-    struct in_addr addr;
-    if (inet_aton(s.ip.c_str(), &addr)) {
-        session->set_ipv4_address(addr);
-    }
-
-    // 4. Apply UPF Connection Data
-    // Note: This only updates the SMF memory. It does NOT send an N4 message to the UPF.
-    pfcp::fseid_t fseid = {};
-    fseid.v4 = 1;    
-    fseid.seid = s.upf_seid;
-    // For simplicity, we assume the UPF IP in the FSEID is the one from the snapshot
-    inet_aton(s.upf_n4_addr.c_str(), &fseid.ipv4_address);
-    
-    session->set_upf_fseid(fseid);
-
-    Logger::smf_app().info("ORCHRA: Successfully forced snapshot into SUPI %s", s.supi.c_str());
-}
-*/

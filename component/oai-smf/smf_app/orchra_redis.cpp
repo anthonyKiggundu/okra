@@ -50,7 +50,11 @@ bool export_snapshot_to_redis(const OrchraUeContextSnapshot& snap) {
     } catch (const Error& e) {
         Logger::smf_app().error("ORCHRA: Redis export failed: %s", e.what());
         return false;
+    } catch (const std::exception& e) {
+        Logger::smf_app().error("ORCHRA: Redis export failed: %s", e.what());
+        return false;
     }
+
 }
 
 std::optional<OrchraUeContextSnapshot> import_snapshot_from_redis(const std::string& supi) {
@@ -86,6 +90,9 @@ std::optional<OrchraUeContextSnapshot> import_snapshot_from_redis(const std::str
         Logger::smf_app().info("ORCHRA: Loaded snapshot from Redis for SUPI: %s", supi.c_str());
         return snap;
 
+    } catch (const std::exception& e) {
+        Logger::smf_app().error("ORCHRA: Redis import failed: %s", e.what());
+        return std::nullopt;
     } catch (const std::exception& e) {
         Logger::smf_app().error("ORCHRA: Redis import failed: %s", e.what());
         return std::nullopt;
