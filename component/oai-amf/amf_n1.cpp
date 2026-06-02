@@ -2507,6 +2507,8 @@ bool amf_n1::get_authentication_vectors_from_ausf(
   std::map<std::string, LinksValueSchema>::iterator iter;
   iter = (ue_authentication_ctx.getLinks()).find("5g-aka");
 
+  // ---------------- Orchra fix to error "Not found 5G_AKA - leading to ILLEGAL UE" --------------
+  /*
   if (iter != (ue_authentication_ctx.getLinks()).end()) {
     nc->href = iter->second.getHref();
     Logger::amf_n1().info("Links is: %s", nc->href);
@@ -2514,6 +2516,23 @@ bool amf_n1::get_authentication_vectors_from_ausf(
     Logger::amf_n1().error("Not found 5G_AKA");
     return false;
   }
+  */
+
+  auto& links = ue_authentication_ctx.getLinks();
+
+  auto iter = links.find("5g-aka");
+  if (iter == links.end()) {
+    iter = links.find("5G_AKA");
+  }
+
+  if (iter != links.end()) {
+    nc->href = iter->second.getHref();
+    Logger::amf_n1().info("Links is: %s", nc->href.c_str());
+  } else {
+    Logger::amf_n1().error("Not found 5G_AKA / 5g-aka link in AUSF response");
+    return false;
+  }
+  // ------------------------ end of Orchra ----------------------------------
 
   // Check Serving Network Name if available
   if (ue_authentication_ctx.servingNetworkNameIsSet()) {
