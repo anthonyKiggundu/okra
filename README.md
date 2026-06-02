@@ -1,7 +1,7 @@
 # Okra Orchestrator API: 
 
 > [!NOTE]
-> This repository is still under setup! However, for a first faster "test of things", cloning "https://gitlab.eurecom.fr/oai/cn5g"
+> This repository is still under setup! However, for a first and faster "test of things", cloning "https://gitlab.eurecom.fr/oai/cn5g"
 > and overwriting the content with what is in this repo would be the easiest. ToDo:: use submoduling
 
 `orchestrator/app/main.py` is the entry point for the Okra REST API used for session migration and inter-slice orchestration.
