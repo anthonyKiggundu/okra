@@ -505,9 +505,17 @@ void supported_integrity_algorithms::from_yaml(const YAML::Node& node) {
   }
   // Default values
   if (no_item_available) {
-    m_5g_ia_list.push_back(string_config_value("NIA", "NIA0"));
-    m_5g_ia_list.push_back(string_config_value("NIA", "NIA1"));
+    // ----------------------- Orchra ----------------------------
+    /*
+     * If the AMF later chooses the first compatible entry, it will drift toward NIA0, 
+     * and UERANSIM rejects that for non-emergency registration. UERANSIM’s own issue tracker 
+     * documents that IA0 is only accepted in emergency mode, not normal registration
+     * So we change the order of the defaults so that it falls to NIA2
+     */
     m_5g_ia_list.push_back(string_config_value("NIA", "NIA2"));
+    m_5g_ia_list.push_back(string_config_value("NIA", "NIA1"));
+    m_5g_ia_list.push_back(string_config_value("NIA", "NIA0"));
+    // ---------------------------- end of Orchra --------------------------
   }
 }
 
@@ -533,10 +541,19 @@ supported_integrity_algorithms::get_supported_integrity_algorithms() const {
     _5g_ia_str_list.push_back(i.get_value());
   }
   // Default values
+  // ----------------------- Orchra ----------------------------
+    /*
+     * If the AMF later chooses the first compatible entry, it will drift toward NIA0,
+     * and UERANSIM rejects that for non-emergency registration. UERANSIM’s own issue tracker
+     * documents that IA0 is only accepted in emergency mode, not normal registration
+     * So we change the order of the defaults so that it falls to NIA2
+     */
+
   if (_5g_ia_str_list.size() == 0) {
-    _5g_ia_str_list.push_back("NIA0");
-    _5g_ia_str_list.push_back("NIA1");
     _5g_ia_str_list.push_back("NIA2");
+    _5g_ia_str_list.push_back("NIA1");
+    _5g_ia_str_list.push_back("NIA0");
+    // ---------------------------- end of Orchra --------------------------
   }
   return _5g_ia_str_list;
 }
@@ -572,9 +589,18 @@ void supported_encryption_algorithms::from_yaml(const YAML::Node& node) {
   }
   // Default values
   if (no_item_available) {
-    m_5g_ea_list.push_back(string_config_value("NEA", "NEA0"));
-    m_5g_ea_list.push_back(string_config_value("NEA", "NEA1"));
+    // ----------------------- Orchra ----------------------------
+    /*
+     * If the AMF later chooses the first compatible entry, it will drift toward NIA0, 
+     * and UERANSIM rejects that for non-emergency registration. UERANSIM’s own issue tracker 
+     * documents that IA0 is only accepted in emergency mode, not normal registration
+     * So we change the order of the defaults so that it falls to NIA2
+     */
+
     m_5g_ea_list.push_back(string_config_value("NEA", "NEA2"));
+    m_5g_ea_list.push_back(string_config_value("NEA", "NEA1"));
+    m_5g_ea_list.push_back(string_config_value("NEA", "NEA0"));
+    // -------------------------- end of Orchra ------------------------
   }
 }
 
@@ -600,10 +626,19 @@ supported_encryption_algorithms::get_supported_encryption_algorithms() const {
     _5g_ea_str_list.push_back(i.get_value());
   }
   // Default values
+  // ----------------------- Orchra ----------------------------
+    /*
+     * If the AMF later chooses the first compatible entry, it will drift toward NIA0,
+     * and UERANSIM rejects that for non-emergency registration. UERANSIM’s own issue tracker
+     * documents that IA0 is only accepted in emergency mode, not normal registration
+     * So we change the order of the defaults so that it falls to NIA2
+     */
+
   if (m_5g_ea_list.size() == 0) {
-    _5g_ea_str_list.push_back("NEA0");
-    _5g_ea_str_list.push_back("NEA1");
     _5g_ea_str_list.push_back("NEA2");
+    _5g_ea_str_list.push_back("NEA1");
+    _5g_ea_str_list.push_back("NEA0");
+    // -------------------------- end of Orchra ------------------------
   }
   return _5g_ea_str_list;
 }
@@ -973,15 +1008,15 @@ amf_config::amf_config(
   add_nf(oai::config::SMF_CONFIG_NAME, m_smf);
 
   auto m_ausf = std::make_shared<nf>(
-      "AUSF", "oai-ausf", sbi_interface("SBI", "oai-ausf", 80, "v1", ""));
+      "AUSF", "oai-ausf", sbi_interface("SBI", "oai-ausf", 8080, "v1", ""));
   add_nf(oai::config::AUSF_CONFIG_NAME, m_ausf);
 
   auto m_udm = std::make_shared<nf>(
-      "UDM", "oai-udm", sbi_interface("SBI", "oai-udm", 80, "v1", ""));
+      "UDM", "oai-udm", sbi_interface("SBI", "oai-udm", 8080, "v1", ""));
   add_nf(oai::config::UDM_CONFIG_NAME, m_udm);
 
   auto m_nrf = std::make_shared<nf>(
-      "NRF", "oai-nrf", sbi_interface("SBI", "oai-nrf", 80, "v1", ""));
+      "NRF", "oai-nrf", sbi_interface("SBI", "oai-nrf", 8080, "v1", ""));
   add_nf(oai::config::NRF_CONFIG_NAME, m_nrf);
 
   auto m_nssf = std::make_shared<nf>(
@@ -1181,15 +1216,19 @@ void amf_config::pre_process() {
   if (get_nf(oai::config::AUSF_CONFIG_NAME)) {
     ausf_addr.api_version =
         get_nf(oai::config::AUSF_CONFIG_NAME)->get_sbi().get_api_version();
-    ausf_addr.uri_root =
-        get_nf(oai::config::AUSF_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
+    // --------------- orchra fixing ports due to http1 vs http2 issues -------------------
+    ausf_addr.uri_root = "http://oai-ausf:80";
+       // get_nf(oai::config::AUSF_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
+    // ----------------------------------- end orchra --------------------------------
   }
 
   if (get_nf(oai::config::UDM_CONFIG_NAME)) {
     udm_addr.api_version =
         get_nf(oai::config::UDM_CONFIG_NAME)->get_sbi().get_api_version();
-    udm_addr.uri_root =
-        get_nf(oai::config::UDM_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
+    // ---------------- orchra fixing ports due to http1 vs http2 issues -------------------
+    udm_addr.uri_root = "http://oai-udm:80";
+        // get_nf(oai::config::UDM_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
+    // ------------------------------- end orchra ---------------------------------
   }
 
   if (get_nf(oai::config::NRF_CONFIG_NAME)) {
