@@ -190,6 +190,16 @@ amf_n1::amf_n1()
       event_sub.subscribe_ue_communication_failure(boost::bind(
           &amf_n1::handle_ue_communication_failure_change, this, _1, _2, _3));
 
+  // ----------------------- ORCHRA INITIALIZATION -----------------------
+  try {
+    std::string redis_url = "tcp://redis-master.base-chart.svc.cluster.local:6379";
+    Logger::amf_n1().info("ORCHRA: Initializing Orchestrator Redis Connection...");
+    orchra::init_redis(redis_url);
+  } catch (const std::exception& e) {
+    Logger::amf_n1().error("ORCHRA: Failed to bootstrap Redis pool during amf_n1 startup: %s", e.what());
+  }
+  // --------------------- END ORCHRA INITIALIZATION ---------------------
+
   Logger::amf_n1().startup("amf_n1 started");
 }
 
@@ -2505,7 +2515,7 @@ bool amf_n1::get_authentication_vectors_from_ausf(
   oai::utils::utils::free_wrapper((void**) &r5g_auth_data_hxresstar);
 
   std::map<std::string, LinksValueSchema>::iterator iter;
-  iter = (ue_authentication_ctx.getLinks()).find("5g-aka");
+  // iter = (ue_authentication_ctx.getLinks()).find("5g-aka");
 
   // ---------------- Orchra fix to error "Not found 5G_AKA - leading to ILLEGAL UE" --------------
   /*
@@ -2520,7 +2530,7 @@ bool amf_n1::get_authentication_vectors_from_ausf(
 
   auto& links = ue_authentication_ctx.getLinks();
 
-  auto iter = links.find("5g-aka");
+  iter = links.find("5g-aka");
   if (iter == links.end()) {
     iter = links.find("5G_AKA");
   }
@@ -2601,6 +2611,7 @@ bool amf_n1::_5g_aka_confirmation_from_ausf(
   }
 
   // Wait and process the response
+  /*
   ConfirmationDataResponse confirmation_data_response = {};
   bool is_result_available                            = true;
   // Wait for the response available and process accordingly
@@ -2619,9 +2630,9 @@ bool amf_n1::_5g_aka_confirmation_from_ausf(
 
         if (confirmation_data_response.getAuthResult().getValue() !=
             AuthResult::eAuthResult::AUTHENTICATION_SUCCESS) {
-          // return false;
+          return false;
 	  // ----------------------- Orchra ---------------------------
-	  Logger::amf_n1().warn("HACK: Auth Failed at AUSF, but forcing success!");
+	  // Logger::amf_n1().warn("HACK: Auth Failed at AUSF, but forcing success!");
 	  // --------------------- enf of Orchra ------------------------
         }
 
@@ -2662,7 +2673,95 @@ bool amf_n1::_5g_aka_confirmation_from_ausf(
     Logger::amf_n1().info("Could not get expected response from AUSF");
     return false;
   }
+  */
 
+  // Wait and process the response
+  // -------------------------- ORHCRA ----------------------------
+  /*
+   * The reason it is failing with ILLEGAL_UE is because the AUSF is either 
+   * sending back an empty response, a 4xx/5xx status code, or a JSON payload 
+   * that does not contain the specific key key kSbiResponseJsonData
+   */
+  // Wait and process the response
+  ConfirmationDataResponse confirmation_data_response = {};
+  bool is_result_available                            = true;
+  std::optional<nlohmann::json> result_opt = std::nullopt;
+  oai::utils::utils::wait_for_result(f, result_opt);
+
+  if (result_opt.has_value()) {
+    nlohmann::json result = result_opt.value();
+    Logger::amf_n1().debug("Got result for promise ID %ld", promise_id);
+  
+    nlohmann::json target_json;
+  
+    // Dynamic Layout Detection: Check if wrapped in "jsonData" or if it's a flat payload
+    if (result.find(kSbiResponseJsonData) != result.end()) {
+      Logger::amf_n1().debug("Detected legacy nested OAI JSON wrapper.");
+      target_json = result[kSbiResponseJsonData];
+    } else {
+      Logger::amf_n1().debug("Detected flat standard 3GPP JSON response body from AUSF.");
+      target_json = result; // The root dictionary contains the parameters directly!
+    }
+
+    try {
+        // 1. Map fields directly into the data response model using the correct layout
+      if (target_json.find("authResult") != target_json.end()) {
+        if (target_json["authResult"].is_boolean()) {
+          bool result_bool = target_json["authResult"].get<bool>();
+          Logger::amf_n1().warn("Okra HACK: Converting boolean authResult (%s) to 3GPP string enum.", 
+                             result_bool ? "true" : "false");
+        
+          // Overwrite the type inline inside the json object before parsing it!
+          if (result_bool) {
+            target_json["authResult"] = "AUTHENTICATION_SUCCESS";
+          } else {
+            target_json["authResult"] = "AUTHENTICATION_FAILURE";
+          }
+        }
+      }
+      // --------------------- End of Okra Orchestrator Hack ------------------------
+
+      // Now from_json will execute without throwing type_error.302!
+      from_json(target_json, confirmation_data_response);
+      is_result_available = true;
+
+      if (confirmation_data_response.getAuthResult().getValue() !=
+          AuthResult::eAuthResult::AUTHENTICATION_SUCCESS) {
+         Logger::amf_n1().warn("Auth Failed at AUSF evaluation layout.");
+      }
+
+      // --- Core 3GPP Key Derivation Sequence ---
+      if (!confirmation_data_response.kseafIsSet()) return false;
+    
+      unsigned char* kseaf_hex = amf_conv::format_string_as_hex(
+          confirmation_data_response.getKseaf());
+      memcpy(nc->_5g_av[0].kseaf, kseaf_hex, AUTH_VECTOR_LENGTH_OCTETS);
+      oai::utils::output_wrapper::print_buffer(
+          "amf_n1", "5G AV: kseaf", nc->_5g_av[0].kseaf,
+          AUTH_VECTOR_LENGTH_OCTETS);
+      oai::utils::utils::free_wrapper((void**) &kseaf_hex);
+
+      Logger::amf_n1().debug("Deriving Kamf");
+      for (int i = 0; i < MAX_5GS_AUTH_VECTORS; i++) {
+        Authentication_5gaka::derive_kamf(
+            nc->imsi, nc->_5g_av[i].kseaf, nc->kamf[i],
+            0x0000);  // second parameter: abba
+        oai::utils::output_wrapper::print_buffer(
+            "amf_n1", "Kamf", nc->kamf[i], AUTH_VECTOR_LENGTH_OCTETS);
+      }
+
+    } catch (std::exception& e) {
+      Logger::amf_n1().error("JSON Mapping Exception inside core: %s", e.what());
+      is_result_available = false;
+    }
+  } else {
+    is_result_available = false;
+  }
+
+  if (!is_result_available) {
+    Logger::amf_n1().info("Could not get expected response from AUSF");
+    return false;
+  }
   // ------------------------ more Orchra --------------------------
   std::string kseaf_str = confirmation_data_response.getKseaf();
 
