@@ -9,12 +9,33 @@ class SliceClient:
         self.base_url = base_url.rstrip("/")
         self.session = session
 
-    async def get_ue_context(self, ue_id: str) -> Dict[str, Any]:
-        url = f"{self.base_url}/ue-context/{ue_id}"
+    #async def get_ue_context(self, ue_id: str) -> Dict[str, Any]:
+    #    #url = f"{self.base_url}/ue-context/{ue_id}"
+    #    supi = "208950000000035"
+    #    pdu_session_id = "1"
+    #    url = f"{self.base_url}/sm-contexts/{supi}/{pdu_session_id}"
+    #    async with async_timeout.timeout(HTTP_TIMEOUT):
+    #        async with self.session.get(url) as resp:
+    #            resp.raise_for_status()
+    #            return await resp.json()
+
+    async def get_ue_context(self, ue_id: str, sm_context_uri: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Fetch a previously created SM context or UE context.
+
+        Prefer the exact SM context URI returned by the SMF Location header.
+        If not provided, fall back to the canonical UE context path.
+        """
+        if sm_context_uri:
+            url = sm_context_uri
+        else:
+            url = f"{self.base_url}/ue-context/{ue_id}"
+
         async with async_timeout.timeout(HTTP_TIMEOUT):
             async with self.session.get(url) as resp:
                 resp.raise_for_status()
                 return await resp.json()
+
 
     async def post_ue_context(self, ue_id: str, context: Dict[str, Any]) -> None:
         url = f"{self.base_url}/ue-context/{ue_id}"
@@ -22,18 +43,153 @@ class SliceClient:
             async with self.session.post(url, json=context) as resp:
                 resp.raise_for_status()
 
-    async def nsmf_pdusession_create(self, ue_id: str, source_context: Dict):
+    #async def nsmf_pdusession_create(self, ue_id: str, source_context: Dict):
+    #    url = f"{self.base_url}/nsmf-pdusession/v1/sm-contexts"
+    #    payload = {
+    #        "ue_id": ue_id,
+    #        "s_nssai": {"sst": 1, "sd": "000001"},
+    #        "source_smf_uri": source_context.get("smf_uri", "http://localhost:8001"),
+    #        "pdu_session_id": source_context.get("pdu_id", 1)
+    #    }
+    #    async with self.session.post(url, json=payload) as resp:
+    #        resp.raise_for_status()
+    #        return await resp.json()
+
+    '''
+    async def nsmf_pdusession_create(self, ue_id: str, source_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new SM context through SMF.
+
+        IMPORTANT:
+        - Use the DNN/S-NSSAI actually requested by the session.
+        - Do not guess the follow-up context URI here.
+        - Read and return the SMF Location header if present.
+        """
         url = f"{self.base_url}/nsmf-pdusession/v1/sm-contexts"
+
         payload = {
             "ue_id": ue_id,
-            "s_nssai": {"sst": 1, "sd": "000001"},
+            "s_nssai": source_context.get("s_nssai", {"sst": 1, "sd": "000001"}),
             "source_smf_uri": source_context.get("smf_uri", "http://localhost:8001"),
-            "pdu_session_id": source_context.get("pdu_id", 1)
+            "pdu_session_id": source_context.get("pdu_id", 1),
         }
-        async with self.session.post(url, json=payload) as resp:
-            resp.raise_for_status()
-            return await resp.json()
 
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=payload) as resp:
+                resp.raise_for_status()
+
+                result: Dict[str, Any] = {}
+                if resp.content_type == "application/json":
+                    result = await resp.json()
+                else:
+                    body = await resp.text()
+                    result = {"raw_body": body} if body else {}
+
+                location = resp.headers.get("Location") or resp.headers.get("location")
+                if location:
+                    result["sm_context_location"] = location
+
+                return result
+    '''
+
+    async def nsmf_pdusession_create(self, ue_id: str, source_context: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.base_url}/nsmf-pdusession/v1/sm-contexts"
+
+        payload = {
+            "ue_id": ue_id,
+            "s_nssai": source_context.get("s_nssai", {"sst": 1, "sd": "000001"}),
+            "source_smf_uri": source_context.get("smf_uri", "http://localhost:8001"),
+            "pdu_session_id": source_context.get("pdu_id", 1),
+        }
+
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=payload) as resp:
+                resp.raise_for_status()
+
+                result: Dict[str, Any] = {}
+                if resp.content_type == "application/json":
+                    result = await resp.json()
+                else:
+                    body = await resp.text()
+                    result = {"raw_body": body} if body else {}
+ 
+                location = resp.headers.get("Location") or resp.headers.get("location")
+                if location:
+                    result["sm_context_location"] = location
+
+                return result
+
+    async def namf_comm_release(self, ue_id: str) -> bool:
+        url = f"{self.base_url}/namf-comm/v1/ue-contexts/{ue_id}/release"
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(
+                url, json={"cause": "SLICE_MIGRATION_COMPLETE"}
+            ) as resp:
+                return resp.status == 204
+
+    async def namf_comm_get_context(self, ue_id: str, context_uri: Optional[str] = None ) -> Dict[str, Any]:
+        """
+        Prefer an explicit context URI when the caller already has one.
+        Fall back to the canonical NAMF UE context path otherwise.
+        """
+        url = context_uri or f"{self.base_url}/namf-comm/v1/ue-contexts/{ue_id}"
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.get(url) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+
+    async def nsmf_pdusession_import_notification(self, ue_id: str, sm_context_uri: Optional[str] = None, source: str = "redis",
+    ) -> Dict[str, Any]:
+        """
+        Tell the NSMF side to import or bind context.
+        Include the exact SM context URI if it already exists.
+        """
+        url = f"{self.base_url}/nsmf-pdusession/v1/import-context"
+        payload = {
+            "ue_id": ue_id,
+            "source": source,
+        }
+        if sm_context_uri:
+            payload["sm_context_uri"] = sm_context_uri
+
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=payload) as resp:
+                resp.raise_for_status()
+                if resp.content_type == "application/json":
+                    return await resp.json()
+                text = await resp.text()
+                return {"raw_body": text} if text else {}
+
+    async def confirm_binding(self, ue_id: str, sm_context_uri: Optional[str] = None,) -> bool:
+        """
+        Confirm binding using the exact SM context URI when available.
+        Do not reconstruct a /sm-contexts/<supi>/<pdu_id> path.
+        """
+        if sm_context_uri:
+            url = f"{sm_context_uri}/confirm"
+        else:
+            url = f"{self.base_url}/confirm/{ue_id}"
+
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.get(url) as resp:
+                return resp.status == 200
+
+    async def commit_session(self, ue_id: str, pdu_id: int, sm_context_uri: Optional[str] = None,) -> None:
+        """
+        Commit the session using the exact SM context URI if present.
+        """
+        if sm_context_uri:
+            url = f"{sm_context_uri}/commit"
+            payload = {"ue_id": ue_id, "pdu_id": pdu_id}
+        else:
+            url = f"{self.base_url}/nsmf-pdusession/v1/commit"
+            payload = {"ue_id": ue_id, "pdu_id": pdu_id}
+
+        async with async_timeout.timeout(HTTP_TIMEOUT):
+            async with self.session.post(url, json=payload) as resp:
+                resp.raise_for_status()
+  
+    '''
     async def namf_comm_release(self, ue_id: str):
         url = f"{self.base_url}/namf-comm/v1/ue-contexts/{ue_id}/release"
         async with self.session.post(url, json={"cause": "SLICE_MIGRATION_COMPLETE"}) as resp:
@@ -58,6 +214,7 @@ class SliceClient:
         url = f"{self.base_url}/nsmf-pdusession/v1/commit"
         async with self.session.post(url, json={"ue_id": ue_id, "pdu_id": pdu_id}) as resp:
             resp.raise_for_status()
+    '''
 
 
 class FlexRANClient:
