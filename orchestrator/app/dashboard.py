@@ -17,6 +17,14 @@ HTML_DASHBOARD_TEMPLATE = """
             --accent-blue: #58a6ff;
             --success: #2ea44f;
             --danger: #da3633;
+            --text-bright: #ffffff;
+        }
+
+        /* Force details text inside metadata and components boxes to be bold and shining white */
+        .text-bright, .meta-item span:not(.meta-label) {
+            color: var(--text-bright) !important;
+            font-weight: 600;
+            text-shadow: 0 0 2px rgba(255, 255, 255, 0.3); /* Subtle brightness glow */
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -148,7 +156,7 @@ HTML_DASHBOARD_TEMPLATE = """
         .details-box {
             font-size: 14px; /* Increased from 12px */
             font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-            color: var(--text-main);
+            color: var(--text-bright);
             line-height: 1.7;
             background: rgba(0, 0, 0, 0.2);
             padding: 15px;
