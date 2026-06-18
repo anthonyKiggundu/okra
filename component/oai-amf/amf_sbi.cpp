@@ -545,8 +545,16 @@ void amf_sbi::handle_itti_message(itti_nsmf_pdusession_create_sm_context& smf) {
       Logger::amf_sbi().debug(
           "Decoded PTI for PDUSessionEstablishmentRequest(0x%x)", pti);
       psc->is_n2sm_available = false;
+      // ------------- Orhcra debugging -------------------
+      Logger::amf_sbi().info(
+          "Orchra:: About to call handle_pdu_session_initial_request: SUPI=%s, DNN=%s, SMF URI=%s, API=%s",
+          nc->supi.c_str(), dnn.c_str(), smf_uri_root.c_str(), smf_api_version.c_str());
       handle_pdu_session_initial_request(
           nc->supi, psc, smf_uri_root, smf_api_version, smf.sm_msg, dnn, uc);
+      Logger::amf_sbi().info(
+         "Orchra:: Returned from handle_pdu_session_initial_request for SUPI=%s, PDU Session ID=%u",
+         nc->supi.c_str(), smf.pdu_sess_id);
+      // -------------------- end of Orchra debugging -----------------
     } break;
     case kExistingPduSession: {
       // TODO:
@@ -605,6 +613,10 @@ void amf_sbi::handle_pdu_session_initial_request(
   Logger::amf_sbi().debug(
       "Handle PDU Session Establishment Request (SUPI %s, PDU Session ID %d)",
       supi.c_str(), psc->pdu_session_id);
+
+  // ------------------ Orchra debugging -------------------
+  Logger::amf_sbi().debug("Entered handle_pdu_session_initial_request");
+  // ------------------ end  Orchra debugging -------------------
 
   std::string remote_uri = amf_sbi_helper::get_smf_pdu_session_base_uri(
       smf_uri_root, smf_api_version);
@@ -1731,8 +1743,21 @@ bool amf_sbi::send_http_request(
   std::shared_ptr<pdu_session_context> psc = {};
   bool is_multipart                        = true;
 
-  if (!amf_app_inst->find_pdu_session_context(supi, pdu_session_id, psc))
-    return false;
+  // -------------------------- Orchra debugging -------------------------
+  //if (!amf_app_inst->find_pdu_session_context(supi, pdu_session_id, psc))
+  //  return false;
+  //
+  Logger::amf_sbi().info("Orchra:: Looking up PDU session context: supi=%s pdu_session_id=%u",
+                           supi.c_str(), pdu_session_id);
+
+  if (!amf_app_inst->find_pdu_session_context(supi, pdu_session_id, psc)) {
+      Logger::amf_sbi().error("PDU session context lookup failed for supi=%s pdu_session_id=%u",
+                             supi.c_str(), pdu_session_id);
+      return false;
+  }
+
+  Logger::amf_sbi().info("Orchra:: PDU session context lookup succeeded");
+  // ----------------------------- end of Orchra debugging ----------------
 
   // prepare the body content
   create_multipart_content(json_data, n1sm_msg, n2sm_msg, is_multipart, body);
@@ -1740,8 +1765,13 @@ bool amf_sbi::send_http_request(
   oai::http::request http_request =
       http_client_inst->prepare_multipart_request(remote_uri, body);
   // Send the request and get the response
+  Logger::amf_sbi().info(" Orchra:: About to POST to SMF: %s", remote_uri.c_str());
   auto http_response = http_client_inst->send_http_request(
       oai::common::sbi::method_e::POST, http_request);
+
+  Logger::amf_sbi().info(
+    "Orchra:: HTTP client returned status=%ld body_size=%zu",
+    http_response.status_code, http_response.body.size());
 
   if (http_response.status_code ==
       oai::common::sbi::http_status_code::NO_RESPONSE) {
@@ -1755,16 +1785,87 @@ bool amf_sbi::send_http_request(
   bstring n1sm_hex                = nullptr;
   bstring n2sm_hex                = nullptr;
 
+  /*
   if (http_response.body.size() > 0) {
-    if (!parser.parse(http_response.body)) {
-      json_data_response = http_response.body;
+    // ------------------ line below is Orchra ----------------
+    Logger::amf_sbi().info("ORCHRA:: RAW HTTP BODY:\n%s", http_response.body.c_str());
+
+    // if (!parser.parse(http_response.body)) {
+    bool parsed = parser.parse(http_response.body);
+    //Logger::amf_sbi().info("ORCHRA:: parser.parse returned %s",  parsed ? "true" : "false");
+
+    //if (!parsed) {
+    //  json_data_response = http_response.body;
+    //} else {
+    //  parser.get(oai::utils::JSON_CONTENT_ID_MIME, json_data_response);
+    //  parser.get(oai::utils::N1_SM_CONTENT_ID, n1sm);
+    //  parser.get(oai::utils::N2_SM_CONTENT_ID, n2sm);
+    //}
+
+    Logger::amf_sbi().info("ORCHRA:: parser.parse returned %s", parsed ? "true" : "false");
+
+    if (!parsed) {
+       Logger::amf_sbi().info(
+          "ORCHRA:: treating response as plain JSON");
+       json_data_response = http_response.body;
     } else {
+       parser.get(oai::utils::JSON_CONTENT_ID_MIME, json_data_response);
+       parser.get(oai::utils::N1_SM_CONTENT_ID, n1sm);
+       parser.get(oai::utils::N2_SM_CONTENT_ID, n2sm);
+
+       Logger::amf_sbi().info(
+           "ORCHRA:: extracted JSON size=%zu",
+           json_data_response.size());
+     }
+    // -------------- Orchra -----------------------
+    //if (json_data_response.empty()) {
+    //  json_data_response = http_response.body;
+    //}
+  }
+  */
+  // ---------------------------- Orchra -----------------------------
+  if (http_response.body.size() > 0) {
+
+    Logger::amf_sbi().info("ORCHRA:: RAW HTTP BODY (%zu bytes):\n%s", http_response.body.size(), http_response.body.c_str());
+
+    bool parsed = parser.parse(http_response.body);
+
+    Logger::amf_sbi().info("ORCHRA:: parser.parse returned %s", parsed ? "true" : "false");
+
+    if (parsed) {
       parser.get(oai::utils::JSON_CONTENT_ID_MIME, json_data_response);
       parser.get(oai::utils::N1_SM_CONTENT_ID, n1sm);
       parser.get(oai::utils::N2_SM_CONTENT_ID, n2sm);
-    }
-  }
 
+      Logger::amf_sbi().info( "ORCHRA:: extracted JSON size=%zu", json_data_response.size());
+
+      Logger::amf_sbi().info("ORCHRA:: N1 present=%s", n1sm.has_value() ? "yes" : "no");
+
+      Logger::amf_sbi().info("ORCHRA:: N2 present=%s", n2sm.has_value() ? "yes" : "no");
+
+      /*
+       * FIX:
+       * Multipart parser succeeded but did not extract a JSON part.
+       * In that case treat the entire body as JSON.
+       */
+      if (json_data_response.empty()) {
+        Logger::amf_sbi().warn("ORCHRA:: parser succeeded but JSON part is empty. " "Falling back to raw body.");
+        json_data_response = http_response.body;
+      }
+    } else {
+      Logger::amf_sbi().info("ORCHRA:: treating response as plain JSON");
+      json_data_response = http_response.body;
+    }
+    Logger::amf_sbi().info("ORCHRA:: final JSON candidate (%zu bytes): %s", json_data_response.size(), json_data_response.c_str());
+  }
+  // --------------------------end of Orchra block -------------------
+  
+  // ---------------------- Orchra debugging -------------------------
+  Logger::amf_sbi().info("HTTP body size: %zu", http_response.body.size());
+  Logger::amf_sbi().info("Parser extracted JSON part size: %zu", json_data_response.size());
+  Logger::amf_sbi().info("Parser extracted N1 size: %s", n1sm.has_value() ? "yes" : "no");
+  Logger::amf_sbi().info("Parser extracted N2 size: %s", n2sm.has_value() ? "yes" : "no");
+  // ---------------------- End of Orchra debugging -------------------------
   Logger::amf_sbi().info("JSON part %s", json_data_response.c_str());
 
   if ((http_response.status_code != oai::common::sbi::http_status_code::OK) &&

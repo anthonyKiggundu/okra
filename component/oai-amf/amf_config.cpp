@@ -1217,8 +1217,8 @@ void amf_config::pre_process() {
     ausf_addr.api_version =
         get_nf(oai::config::AUSF_CONFIG_NAME)->get_sbi().get_api_version();
     // --------------- orchra fixing ports due to http1 vs http2 issues -------------------
-    ausf_addr.uri_root = get_nf(oai::config::AUSF_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
-       // "http://oai-ausf:80";
+    ausf_addr.uri_root = "http://oai-ausf:80";
+       // get_nf(oai::config::AUSF_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
     // ----------------------------------- end orchra --------------------------------
   }
 
@@ -1226,8 +1226,8 @@ void amf_config::pre_process() {
     udm_addr.api_version =
         get_nf(oai::config::UDM_CONFIG_NAME)->get_sbi().get_api_version();
     // ---------------- orchra fixing ports due to http1 vs http2 issues -------------------
-    udm_addr.uri_root = get_nf(oai::config::UDM_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
-        // "http://oai-udm:80";
+    udm_addr.uri_root = "http://oai-udm:80";
+        // get_nf(oai::config::UDM_CONFIG_NAME)->get_url(amf_cfg->enable_tls());
     // ------------------------------- end orchra ---------------------------------
   }
 
