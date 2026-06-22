@@ -15,7 +15,7 @@ releases:
     namespace: base-chart
     chart: ./charts/redis #bitnami/redis
     values:
-      - /home/antillas/queues/python/slice_orga/base-charts/charts/redis/values.yaml        
+      - ../charts/redis/values.yaml        
       - replicaCount: 1
         resources:
           requests:
@@ -47,23 +47,23 @@ releases:
     values:
       - ./charts/ueransim-ue/values.yaml
 
-  # 5. Mosaic-5G Control Layer (Your provided Python code)
+  # 5. Mosaic-5G Control Layer
   - name: mosaic5g-controller
     namespace: base-chart
     chart: ./charts/mosaic
     values:
-      - /home/antillas/queues/python/slice_orga/base-charts/charts/mosaic/mosaic_values.yaml        
+      - ../charts/mosaic/mosaic_values.yaml        
         
   - name: orchestrator
     namespace: base-chart
     chart: ./charts/orchestrator
     values:
-      - /home/antillas/queues/python/slice_orga/base-charts/charts/orchestrator/values.yaml
+      - ../charts/orchestrator/values.yaml
 
   # 3. FlexRIC (The RIC Platform)
   - name: flexric
     namespace: base-chart
     chart: ./charts/flexric
     values:
-      - /home/antillas/queues/python/slice_orga/base-charts/charts/flexric/values.yaml
+      - ../charts/flexric/values.yaml
 
