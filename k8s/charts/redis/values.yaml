@@ -1,9 +1,9 @@
-namespace: 5g-redis
+namespace: base-chart
 replicaCount: 1
 
 image:
   repository: redis
-  tag: "6.2"
+  tag: "7.2.4-alpine"
   pullPolicy: IfNotPresent
 
 resources:
