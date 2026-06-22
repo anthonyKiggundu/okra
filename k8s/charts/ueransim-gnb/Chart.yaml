@@ -1,0 +1,10 @@
+apiVersion: v2
+name: ueransim-gnb
+description: A Helm chart for UERANSIM gNB connecting to OAI 5G Core
+type: application
+
+# This is the chart version (internal to your helm setup)
+version: 0.1.0
+
+# This is the version of UERANSIM itself
+appVersion: "3.2.6"

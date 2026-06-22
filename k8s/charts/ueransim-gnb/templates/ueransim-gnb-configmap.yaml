@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ueransim-gnb-config
+  namespace: base-chart #-vanilla
+data:
+  gnb.yaml: |
+    mcc: {{ .Values.config.mcc | quote }}
+    mnc: {{ .Values.config.mnc | quote }}
+
+    nci: "0x000000010"
+    idLength: 32
+    tac: {{ .Values.config.tac }} #1 #40960
+
+    linkIp: "0.0.0.0"
+    ngapIp: "0.0.0.0"
+    gtpIp: "0.0.0.0"
+
+    amfConfigs:
+      - address: {{ .Values.config.amfIp }}
+        port: 38412
+
+    slices:
+      - sst: {{ .Values.config.nssai.sst }} #1
+        sd: {{ .Values.config.nssai.sd | quote }} #"000001"
+
+      #- sst: {{ .Values.config.nssai.sst }}
+      #  sd: {{ .Values.config.nssai.sd }}
+      #- sst: 1
+      #  sd: "000001"
+
+    # Required by UERANSIM
+    # Update this part:
+    #plmnSupportList:
+    #  - mcc: "208"
+    #    mnc: "95"
+    #    tac: 40960
+    #    slices:
+    #      - sst: 1
+    #      - sst: 1
+    #        sd: "000001"
+    #      - sst: 222
+    #       sd: "00007B"
+
+    # Standard UERANSIM frequencies
+    pci: 1
+    rootSequenceIndex: 1
+    bandwidth: 20
+    subcarrierSpacing: 30000
+    dlArfcn: 640000
+    ulArfcn: 640000
+
+    ignoreStreamIds: true

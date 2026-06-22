@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ueransim-gnb
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ueransim-gnb
+  template:
+    metadata:
+      labels:
+        app: ueransim-gnb
+    spec:
+      containers:
+        - name: gnb
+          image: gradiant/ueransim:3.2.7
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          command: ["/bin/sh", "-c"] #["nr-gnb"]
+          args: #["-c", "/config/gnb.yaml"]
+            - |
+              envsubst < /config/gnb.yaml > /tmp/gnb.yaml && \
+              nr-gnb -c /tmp/gnb.yaml
+          volumeMounts:
+            - name: cfg
+              mountPath: /config
+      volumes:
+        - name: cfg
+          configMap:
+            name: ueransim-gnb-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ueransim-gnb-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: ueransim-gnb
+  ports:
+    - name: gtp
+      port: 2152
+      protocol: UDP

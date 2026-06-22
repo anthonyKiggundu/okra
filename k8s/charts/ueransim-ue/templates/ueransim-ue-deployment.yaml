@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ueransim-ue
+  namespace: base-chart
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ueransim-ue
+  template:
+    metadata:
+      labels:
+        app: ueransim-ue
+    spec:
+      containers:
+        - name: ue
+          image: gradiant/ueransim:3.2.7
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN"]
+          command: ["nr-ue"]
+          args: ["-c", "/config/ue.yaml"]
+
+          volumeMounts:
+            - name: cfg
+              mountPath: /config/ue.yaml
+              subPath: ue.yaml
+              #mountPath: /config
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+            - name: shared-data
+              mountPath: /data
+      volumes:
+        - name: cfg
+          configMap:
+            name: ueransim-ue-config
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        - name: shared-data
+          emptyDir: {}

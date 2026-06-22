@@ -1,0 +1,14 @@
+image:
+  repository: "herlesinc/ueransim" # Or your preferred ueransim image
+  tag: "latest"
+
+config:
+  amfIp: "oai-amf.oai-core.svc.cluster.local" # Adjust based on your actual AMF service name
+  mcc: "208"
+  mnc: "95"
+  tac: 40960 #1
+  gnbId: "0xe00"
+  nssai:
+    sst: 1
+    sd: "000001"
+

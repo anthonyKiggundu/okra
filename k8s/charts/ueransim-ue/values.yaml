@@ -1,0 +1,12 @@
+image:
+  repository: "herlesinc/ueransim"
+  tag: "latest"
+
+config:
+  gnbSearchList: "ueransim-gnb-service"
+  imsi: "208950000000035"
+  key: "fec86ba6eb707ed08905757b1bb44b8f" #"8baf473f2f8fd09487cccbd7097c6a0b"
+  op: "c42449364bb93851d663b64bc99e697e" #"8e27b6af0e9762c0524c53477d454816"
+  amf: "8000"
+  apn: "oai.ipv4"
+
