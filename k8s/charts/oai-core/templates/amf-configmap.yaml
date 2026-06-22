@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-amf-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "amf") | nindent 4 }}
+data:
+  config.yaml: |-
+    support_features:
+      use_http2: yes
+    amf:
+      host: oai-amf
+      realm: openairinterface.org
+      supported_integrity_algorithms:
+        - "NIA2"
+        - "NIA1"
+        - "NIA0"
+      supported_encryption_algorithms:
+        - "NEA2"
+        - "NEA1"
+        - "NEA0"
+      selected_network_functions:
+        - nrf
+        - ausf
+        - udm
+          #- pcf
+      # ADD THIS BLOCK TO BYPASS PCF COMPONENT RESOLUTION
+      support_features_options:
+        enable_simple_scenario: "no"
+
+      nrf_uri: "http://oai-nrf.oai-core.svc.cluster.local:80"
+      ausf:
+        host: oai-ausf.base-chart.svc.cluster.local #oai-ausf
+        port: 80
+        api_version: v1
+      udm:
+        host: oai-udm.base-chart.svc.cluster.local #oai-udm
+        port: 80
+        api_version: v1
+      pcf:
+        host: 127.0.0.1
+        port: 8085
+        api_version: v1
+      served_guami_list:
+        - mcc: 208
+          mnc: 95
+          amf_region_id: "02"
+          amf_set_id: "001"
+          amf_pointer: "01"
+      plmn_support_list:
+        - mcc: 208
+          mnc: 95
+          tac: 40960
+          nssai:
+            - sst: 1
+              sd: "000001"
+    nfs:
+      amf:
+        host: oai-amf
+        sbi:
+          addr4: "0.0.0.0"
+          port: 8080
+          api_version: v1
+        n2:
+          interface_name: eth0
+          port: 38412
+      smf:
+        host: oai-smf
+        sbi:
+          port: 8080
+          api_version: v1
+        n4:
+          interface_name: eth0
+          port: 8805
+      pcf:
+        host: 127.0.0.1
+        sbi:
+          port: 8085
+          api_version: v1
+      udm:
+        host: oai-udm
+        sbi:
+          port: 80
+          api_version: v1
+      ausf:
+        host: oai-ausf
+        sbi:
+          port: 80
+          api_version: v1
+      nrf:
+        host: oai-nrf
+        sbi:
+          port: 80
+          api_version: v1
+    database:
+      host: oai-mysql
+      user: test
+      type: mysql
+      password: test
+      database_name: oai_db
+      connection_timeout: 300

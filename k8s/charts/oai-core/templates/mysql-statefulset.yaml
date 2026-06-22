@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oai-mysql
+  namespace: {{ .Release.Namespace }}
+spec:
+  serviceName: oai-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oai-mysql
+  template:
+    metadata:
+      labels:
+        app: oai-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: {{ .Values.images.mysql }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3306
+              name: mysql
+              protocol: TCP
+          env:
+            - name: MYSQL_DATABASE
+              value: {{ .Values.mysql.auth.database | quote }}
+            - name: MYSQL_USER
+              value: {{ .Values.mysql.auth.username | quote }}
+            - name: MYSQL_PASSWORD
+              value: {{ .Values.mysql.auth.password | quote }}
+            - name: MYSQL_ROOT_PASSWORD
+              value: {{ .Values.mysql.auth.rootPassword | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql

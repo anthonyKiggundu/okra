@@ -1,34 +1,34 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oai-udr
+  name: oai-udm
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "udr") | nindent 4 }}
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "udm") | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: oai-udr
+      app: oai-udm
   template:
     metadata:
       labels:
-        app: oai-udr
+        app: oai-udm
         app.kubernetes.io/name: oai-core-cn5g
-        app.kubernetes.io/component: udr
+        app.kubernetes.io/component: udm
     spec:
       containers:
-      - name: udr
-        image: {{ index .Values.images "udr" }}
+      - name: udm
+        image: {{ index .Values.images "udm" }}
         ports:
         - name: sbi
           containerPort: 8080
           protocol: TCP
         volumeMounts:
-        - name: udr-config
-          mountPath: /openair-udr/etc/config.yaml
+        - name: udm-config
+          mountPath: /openair-udm/etc/config.yaml
           subPath: config.yaml
       volumes:
-      - name: udr-config
+      - name: udm-config
         configMap:
-          name: oai-udr-config
+          name: oai-udm-config

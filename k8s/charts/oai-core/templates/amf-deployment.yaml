@@ -2,7 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: oai-amf
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "amf") | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -12,24 +14,29 @@ spec:
     metadata:
       labels:
         app: oai-amf
+        app.kubernetes.io/name: oai-core-cn5g
+        app.kubernetes.io/component: amf
     spec:
       containers:
       - name: amf
-        image: {{ .Values.amf.image }}
+        image: {{ index .Values.images "amf" }}
         ports:
-        - name: ngap
-          containerPort: {{ .Values.amf.ngapPort }}
-          protocol: SCTP
         - name: sbi
-          containerPort: {{ .Values.amf.sbiPort }}
+          containerPort: 8080
           protocol: TCP
-        {{- if .Values.amf.metricsPort }}
-        - name: metrics
-          containerPort: {{ .Values.amf.metricsPort }}
-          protocol: TCP
-        {{- end }}
-        # keep existing env/volumeMounts/args if present in upstream chart
-        {{- with .Values.amf.resources }}
-        resources:
-{{ toYaml . | indent 10 }}
-        {{- end }}
+        - name: ngap
+          containerPort: 38412
+          protocol: SCTP
+        env:
+        - name: INT_ALGO_LIST
+          value: "NIA2 NIA1 NIA3"
+        - name: CIPH_ALGO_LIST
+          value: "NEA2 NEA1 NEA3"
+        volumeMounts:
+        - name: amf-config
+          mountPath: /openair-amf/etc/config.yaml
+          subPath: config.yaml
+      volumes:
+      - name: amf-config
+        configMap:
+          name: oai-amf-config

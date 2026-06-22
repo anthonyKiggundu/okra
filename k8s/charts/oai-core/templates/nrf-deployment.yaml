@@ -1,34 +1,34 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oai-udr
+  name: oai-nrf
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "udr") | nindent 4 }}
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "nrf") | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: oai-udr
+      app: oai-nrf
   template:
     metadata:
       labels:
-        app: oai-udr
+        app: oai-nrf
         app.kubernetes.io/name: oai-core-cn5g
-        app.kubernetes.io/component: udr
+        app.kubernetes.io/component: nrf
     spec:
       containers:
-      - name: udr
-        image: {{ index .Values.images "udr" }}
+      - name: nrf
+        image: {{ index .Values.images "nrf" }}
         ports:
         - name: sbi
           containerPort: 8080
           protocol: TCP
         volumeMounts:
-        - name: udr-config
-          mountPath: /openair-udr/etc/config.yaml
+        - name: nrf-config
+          mountPath: /openair-nrf/etc/config.yaml
           subPath: config.yaml
       volumes:
-      - name: udr-config
+      - name: nrf-config
         configMap:
-          name: oai-udr-config
+          name: oai-nrf-config

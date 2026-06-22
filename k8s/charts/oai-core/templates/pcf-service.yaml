@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-pcf
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "pcf") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: sbi
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  selector:
+    app: oai-pcf

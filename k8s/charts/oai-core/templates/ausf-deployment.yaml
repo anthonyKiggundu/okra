@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-ausf
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oai-ausf
+  template:
+    metadata:
+      labels:
+        app: oai-ausf
+    spec:
+      containers:
+        - name: ausf
+          image: "{{ .Values.ausf.image.repository }}:{{ .Values.ausf.image.tag }}"
+          ports:
+            - name: sbi
+              containerPort: 80 
+              protocol: TCP
+          volumeMounts:
+            - name: ausf-config
+              mountPath: {{ .Values.ausf.config.mountPath }}
+              subPath: config.yaml
+      volumes:
+        - name: ausf-config
+          configMap:
+            name: oai-ausf-config

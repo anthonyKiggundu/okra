@@ -41,6 +41,10 @@ spec:
         env:
         - name: TZ
           value: Europe/Paris
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
         volumeMounts:
         - name: upf-config
           mountPath: /openair-upf/etc/config.yaml
@@ -51,3 +55,4 @@ spec:
       - name: upf-config
         configMap:
           name: oai-upf-config
+

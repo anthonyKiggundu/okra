@@ -2,7 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: oai-smf
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "smf") | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -12,21 +14,28 @@ spec:
     metadata:
       labels:
         app: oai-smf
+        app.kubernetes.io/name: oai-core-cn5g
+        app.kubernetes.io/component: smf
     spec:
       containers:
       - name: smf
-        image: {{ .Values.smf.image }}
+        image: {{ index .Values.images "smf" }}
         ports:
         - name: sbi
-          containerPort: {{ .Values.smf.sbiPort | default 443 }}
+          containerPort: 8080
           protocol: TCP
-        {{- if .Values.smf.metricsPort }}
-        - name: metrics
-          containerPort: {{ .Values.smf.metricsPort }}
+        - name: n4
+          containerPort: 8805
+          protocol: UDP
+        - name: http
+          containerPort: 8080
           protocol: TCP
-        {{- end }}
-        env:
-        - name: TZ
-          value: Europe/Paris
-        resources:
-{{ toYaml .Values.smf.resources | indent 10 }}
+
+        volumeMounts:
+        - name: smf-config
+          mountPath: /openair-smf/etc/config.yaml
+          subPath: config.yaml
+      volumes:
+      - name: smf-config
+        configMap:
+          name: oai-smf-config

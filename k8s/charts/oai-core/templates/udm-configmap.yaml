@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-udm-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "udm") | nindent 4 }}
+data:
+  config.yaml: |-
+    log_level:
+      general: debug
+    register_nf:
+      general: yes
+    http_version: 1
+    udm:
+      host: oai-udm
+      sbi:
+        addr4: "0.0.0.0"
+        # This will now correctly pull '8080' from your udm.service.targetPort
+        port: {{ .Values.udm.service.targetPort | default 8080 }}
+        api_version: v1
+    nrf:
+      host: oai-nrf
+      sbi:
+        # This pulls '80' from your nrf.service.port so the UDM looks in the right place
+        port: {{ .Values.nrf.service.port | default 80 }}
+        api_version: v1
+    udr:
+      host: oai-udr
+      sbi:
+        # This pulls '80' from your udr.service.port so the UDM looks in the right place
+        port: {{ .Values.udr.service.port | default 80 }}
+        api_version: v1
+    database:
+      host: oai-mysql
+      user: test
+      type: mysql
+      password: test
+      database_name: oai_db
+      connection_timeout: 300

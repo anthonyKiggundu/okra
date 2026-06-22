@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-ausf
+  namespace: base-chart
+  labels:
+    app: oai-ausf
+spec:
+  type: ClusterIP
+  selector:
+    app: oai-ausf  # This must match the label inside your AUSF Deployment spec.template.metadata.labels
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80        # The port your AMF is calling
+      targetPort: 80  # The port your AUSF container is listening on (from netstat)

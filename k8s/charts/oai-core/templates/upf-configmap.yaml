@@ -12,7 +12,7 @@ data:
     register_nf:
       general: yes
     
-    http_version: 2
+    http_version: 1 #2
     
     # NRF configuration (optional - set to 'no' if not using NRF)
     nrf:
@@ -33,19 +33,25 @@ data:
       
       # Network interfaces - using standard Kubernetes pod interface
       upf_info:
+        sNssaiUpfInfoList:
+          - sNssai:
+              sst: 1
+              sd: "000001"
+            dnnUpfInfoList:
+              - dnn: "oai.ipv4"
         snat: yes
-        interface_name:
-        - {{ .Values.upf.n3InterfaceName | default "eth0" }}
-        - {{ .Values.upf.n4InterfaceName | default "eth0" }}
-        - {{ .Values.upf.n6InterfaceName | default "eth0" }}
+        interface_name: "eth0"
+          #- {{ .Values.upf.n3InterfaceName | default "eth0" }}
+          #- {{ .Values.upf.n4InterfaceName | default "eth0" }}
+          #- {{ .Values.upf.n6InterfaceName | default "eth0" }}
         
       # PFCP (N4) interface configuration
       pfcp:
         enable: yes
         node_id: {{ .Values.upf.n4NodeId | default "127.0.0.1" }}
         sbi:
-          interface_name: {{ .Values.upf.n4InterfaceName | default "eth0" }}
-          port: {{ .Values.upf.pfcpPort | default 8805 }}
+          interface_name: "eth0" #{{ .Values.upf.n4InterfaceName | default "eth0" }}
+          port: "8805" #{{ .Values.upf.pfcpPort | default 8805 }}
       
       # GTP-U (N3) interface configuration  
       gtpu:
@@ -56,7 +62,7 @@ data:
     
     # DNN (Data Network Name) configurations
     dnns:
-    - dnn: "oai"
+    - dnn: "oai.ipv4"
       pdu_session_type: "IPV4"
       ipv4_subnet: "12.1.1.0/24"
     - dnn: "internet"
@@ -65,3 +71,4 @@ data:
     - dnn: "ims"
       pdu_session_type: "IPV4V6"
       ipv4_subnet: "12.1.1.0/24"
+

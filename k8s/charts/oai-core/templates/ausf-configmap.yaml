@@ -1,0 +1,12 @@
+{{- if .Values.ausf.enabled }}
+{{- if .Values.ausf.config.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ausf-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |-
+{{ .Values.ausf.config.content | nindent 4 }}
+{{- end }}
+{{- end }}

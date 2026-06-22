@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-smf-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oai-core-cn5g.componentLabels" (dict "Values" .Values "Chart" .Chart "Release" .Release "component" "smf") | nindent 4 }}
+data:
+  config.yaml: |-
+    support_features:
+      use_local_subscription_info: yes
+      use_local_pcc_rules: yes
+    smf:
+      host: oai-smf #.base-chart.svc.cluster.local
+      sbi:
+        addr4: "0.0.0.0"
+        interface_name: eth0
+        port: 8080
+        api_version: v1
+      n4:
+        addr4: "0.0.0.0"
+        port: 8805
+        api_version: v1
+      smf_info:
+        sNssaiSmfInfoList:
+          - sNssai:
+              sst: 1
+              sd: "000001"
+            dnnSmfInfoList:
+              - dnn: "oai.ipv4"
+    nrf:
+      host: oai-nrf
+      sbi:
+        port: 8080
+        api_version: v1      
+    upf:
+      host: oai-upf
+      n4:
+        addr4: "oai-upf"
+        port: 8805
+        api_version: v1
+    ue_dns:
+      primary_ipv4: "8.8.8.8"
+      primary_ipv6: "2001:4860:4860::8888"
+      secondary_ipv4: "8.8.4.4"
+      secondary_ipv6: "2001:4860:4860::8844"
+    ims:
+      pcscf_ipv4: "127.0.0.1"
+      pcscf_ipv6: "fe80::1"
+    local_subscription_infos:
+      - single_nssai:
+          sst: 1
+          sd: "000001"
+        dnn: "oai.ipv4"
+        qos_profile:
+          5qi: 9
+          session_ambr_ul: "200Mbps"
+          session_ambr_dl: "400Mbps"
+    dnns:
+      - dnn: "oai.ipv4"
+        pdu_session_type: "IPV4"
+        ipv4_subnet: "12.1.1.128/25"
+      - dnn: "oai.ipv4"
+        pdu_session_type: "IPV4"
+        ipv4_subnet: "12.1.1.64/26"
+      - dnn: "default"
+        pdu_session_type: "IPV4"
+        ipv4_subnet: "12.1.1.0/26"
+      - dnn: "ims"
+        pdu_session_type: "IPV4V6"
+        ipv4_subnet: "14.1.1.0/24"
