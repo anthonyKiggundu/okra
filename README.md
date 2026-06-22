@@ -1,6 +1,6 @@
-# Okra
+# Orchra
 
-Okra is a 5G orchestration and experimentation repository that combines:
+Orchra is a 5G orchestration and experimentation repository that combines:
 
 - **Customized OAI core components** under `component/`
 - A **Python FastAPI orchestrator** under `orchestrator/`
