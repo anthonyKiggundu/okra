@@ -28,9 +28,9 @@ It starts a FastAPI service that:
 
 - exposes orchestration and health endpoints
 - serves a dashboard UI
-- checks Kubernetes cluster/service health
-- interacts with Redis for context/state handling
-- coordinates migration-related flows across baseline and Orchra environments
+- checks Kubernetes cluster and service health
+- interacts with Redis for context and state handling
+- coordinates migration-related flows across **baseline** and **Orchra** environments
 - integrates with external control-plane helpers such as FlexRIC, UPF, and slice-control endpoints
 
 Supporting modules include:
@@ -40,6 +40,22 @@ Supporting modules include:
 - `orchestrator/app/models.py` — request/response models
 - `orchestrator/app/config.py` — environment-specific service and namespace settings
 - `orchestrator/app/dashboard.py` — embedded HTML dashboard template
+
+## Naming note: Okra vs Orchra
+
+The repository name is **Okra**, but parts of the implementation still use **Orchra** internally.
+
+Examples include:
+
+- route names such as `POST /trigger-orchra-migration`
+- config variables such as `K8S_NAMESPACE_ORCHRA` and `REDIS_HOST_ORCHRA`
+- dashboard labels such as `Orchra Production Diagnostics`
+- OAI component files and symbols such as `orchra_context.*` and `orchra_redis.*`
+
+For now, this README uses:
+
+- **Okra** for the repository/project name
+- **Orchra** when referring to names that currently exist in code
 
 ## Current API surface
 
@@ -61,8 +77,8 @@ OpenAPI docs remain available at:
 
 The repository currently reflects two common ways the service is run:
 
-- **Local development** from `orchestrator/app/main.py`, typically with Uvicorn
-- **Container deployment** via `orchestrator/Dockerfile`
+- **Local development** from `orchestrator/app/main.py`, typically with Uvicorn on port `8000`
+- **Container deployment** via `orchestrator/Dockerfile`, exposing port `8080`
 
 The Docker image:
 
@@ -100,6 +116,41 @@ Important settings include:
 
 > [!IMPORTANT]
 > Some runtime values are still hard-coded for experimentation, including controller and Redis connection details. Review `orchestrator/app/config.py` before deploying to a different environment.
+
+## Namespace note
+
+The repo currently contains **mixed namespace assumptions** between the Python service, Helmfile deployment, and some chart values.
+
+Examples:
+
+- `orchestrator/app/config.py` defaults to:
+  - baseline namespace: `oai-core-vanilla`
+  - Orchra namespace: `base-chart`
+  - RIC namespace: `5g-ric`
+- `k8s/helmfile.yaml` deploys releases into:
+  - `5g-core`
+  - `5g-ric`
+  - `5g-orchestrator`
+- `scripts/cleanup.sh` deletes:
+  - `5g-core`
+  - `5g-ran`
+  - `5g-ric`
+  - `5g-orchestrator`
+
+This means the runtime defaults in Python do **not** currently line up perfectly with the namespaces used by Helmfile.
+
+## Redis connectivity note
+
+Redis settings are also not fully aligned across the repo yet.
+
+Current examples in the codebase include:
+
+- `orchestrator/app/config.py` uses `redis://127.0.0.1:6380/0` for local testing via port-forward
+- `component/oai-amf/amf_n1.cpp` initializes Redis with `tcp://redis-master.base-chart.svc.cluster.local:6379`
+- `k8s/helmfile.yaml` deploys Redis in namespace `5g-core`
+- `k8s/values/orchestrator-values.yaml` references `redis-master.5g.svc.cluster.local:6379`
+
+Before using this in a shared or production-like cluster, standardize Redis hostnames, namespace references, and URL formatting.
 
 ## Local development
 
@@ -203,6 +254,7 @@ Examples visible in the repository include:
 - Orchra-specific context transfer helpers
 - SMF build updates to include Orchra source files
 - API/model additions related to context transfer
+- internal AMF/SMF changes marked as `OKRA` or `ORCHRA` in comments and symbols
 
 This means Okra should be treated as a combined platform repo, not just a Python control service.
 
@@ -236,5 +288,6 @@ curl http://localhost:8080/health
 ## Notes
 
 - The previous README described the repo primarily as an "Okra Orchestrator API". That is now incomplete because the repository also includes OAI component modifications and cluster deployment assets.
-- Some filenames, namespaces, ports, and service URLs indicate the project is still evolving; treat this README as a practical overview of the repo as it exists today.
+- Naming is still evolving across the codebase; expect both **Okra** and **Orchra** references until the repo is normalized.
+- Namespace, Redis, and service-host settings are not yet fully standardized across Python code, Helm values, and helper scripts.
 - Before production use, review hard-coded endpoints, namespace defaults, Redis connectivity assumptions, and deployment values.
