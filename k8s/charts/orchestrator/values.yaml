@@ -24,13 +24,13 @@ resources: {}
 orchestrator:
   # image can be used by templates as .Values.orchestrator.image.repository/.tag
   image:
-    repository: ghcr.io/anthonykiggundu/orchestrator
-    tag: latest
+    repository: ghcr.io/anthonykiggundu/slice-orchestrator
+    tag: v4
     pullPolicy: IfNotPresent  # Provide the default image pull policy
   env:
-    REDIS_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/0"
-    CELERY_BROKER_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/1"
-    CELERY_BACKEND_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/2"  
+    REDIS_URL: "redis://redis-master.base-chart.svc.cluster.local:6379/0"
+      #CELERY_BROKER_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/1"
+      #CELERY_BACKEND_URL: "redis://redis-master.5g-core.svc.cluster.local:6379/2"  
     pullPolicy: IfNotPresent
   # keep a replicas key to be used by updated templates (.Values.orchestrator.replicas)
   replicas: 1
@@ -46,4 +46,4 @@ orchestrator:
   #
 
 redis:
-  url: "redis://redis-master.5g-core.svc.cluster.local:6379/0"
+  url: "redis://redis-master.base-chart.svc.cluster.local:6379/0"
