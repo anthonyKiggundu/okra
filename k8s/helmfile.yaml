@@ -2,53 +2,68 @@ repositories:
   - name: bitnami
     url: https://charts.bitnami.com/bitnami
 
-# Add this section
 helmDefaults:
+  wait: true
+  timeout: 900
+  atomic: true
+  cleanupOnFail: true
   createNamespace: true
 
 releases:
   # Deploy Redis first
   - name: redis
-    namespace: 5g-core
-    chart: bitnami/redis
-    version: 18.19.0
+    namespace: base-chart
+    chart: ./charts/redis #bitnami/redis
     values:
-      - architecture: standalone
-      - auth:
-          enabled: false  # Disable password for simplicity (enable in production!)
-      - master:
-          persistence:
-            enabled: false  # Disable persistence for testing
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
+      - /home/antillas/queues/python/slice_orga/base-charts/charts/redis/values.yaml        
+      - replicaCount: 1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
 
   - name: oai-core
-    namespace: 5g-core
+    namespace: base-chart
     chart: ./charts/oai-core
     values:
       - ./charts/oai-core/values.yaml
 
-        #- name: srsran
-        #    namespace: 5g-ran
-        #    chart: ./charts/srsran
-        #    values:
-        #      - ./charts/srsran/values.yaml
-
-  - name: flexric
-    namespace: 5g-ric
-    chart: ./charts/flexric
+  - name: ueransim-gnb
+    namespace: base-chart
+    chart: ./charts/ueransim-gnb
+    needs:
+      - base-chart/oai-core
     values:
-      - ./charts/flexric/values.yaml
+      - ./charts/ueransim-gnb/values.yaml
 
+  - name: ueransim-ue
+    namespace: base-chart
+    chart: ./charts/ueransim-ue
+    needs:
+      - base-chart/ueransim-gnb
+    values:
+      - ./charts/ueransim-ue/values.yaml
+
+  # 5. Mosaic-5G Control Layer (Your provided Python code)
+  - name: mosaic5g-controller
+    namespace: base-chart
+    chart: ./charts/mosaic
+    values:
+      - /home/antillas/queues/python/slice_orga/base-charts/charts/mosaic/mosaic_values.yaml        
+        
   - name: orchestrator
-    namespace: 5g-orchestrator
+    namespace: base-chart
     chart: ./charts/orchestrator
     values:
-      - ./charts/orchestrator/values.yaml
-    needs:
-      - 5g-core/redis  # Wait for Redis to be ready
+      - /home/antillas/queues/python/slice_orga/base-charts/charts/orchestrator/values.yaml
+
+  # 3. FlexRIC (The RIC Platform)
+  - name: flexric
+    namespace: base-chart
+    chart: ./charts/flexric
+    values:
+      - /home/antillas/queues/python/slice_orga/base-charts/charts/flexric/values.yaml
+
