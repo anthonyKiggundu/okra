@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flexric-config
+  namespace: {{ .Release.Namespace }}
+data:
+  flexric.conf: |
+    # FlexRIC Configuration
+    
+    [NEAR-RIC]
+    NEAR_RIC_IP = 0.0.0.0
+    
+    [E2]
+    # E2 interface configuration
+    E2_PORT = {{ .Values.service.port }}
+    E2_BIND_IP = 0.0.0.0
+    
+    [XAPP]
+    # Path to xApps shared libraries
+    XAPP_PATH = /usr/local/lib/flexric/
+    
+    [LOG]
+    # Log level: DEBUG, INFO, WARN, ERROR
+    LOG_LEVEL = IN
