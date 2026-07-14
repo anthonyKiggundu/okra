@@ -276,7 +276,25 @@ bool smf_config::init() {
         load_internal_api(orchra_node["smf"]["internal_api"]);
         
         // 2. Ensure #include "orchra_redis.hpp" is at the top of this file
-        orchra::init_redis(internal_api.redis_url);
+        // orchra::init_redis(internal_api.redis_url);
+	orchra::RedisCryptoConfig cfg{};
+        cfg.enabled = (std::getenv("ORCHRA_REDIS_CRYPTO_ENABLED") &&
+               std::string(std::getenv("ORCHRA_REDIS_CRYPTO_ENABLED")) == "true");
+        cfg.provider = std::getenv("ORCHRA_REDIS_CRYPTO_PROVIDER")
+          ? std::getenv("ORCHRA_REDIS_CRYPTO_PROVIDER") : "aes-gcm";
+        cfg.active_kid = std::getenv("ORCHRA_REDIS_CRYPTO_ACTIVE_KID")
+          ? std::getenv("ORCHRA_REDIS_CRYPTO_ACTIVE_KID") : "k1";
+        cfg.keyring_json = std::getenv("ORCHRA_REDIS_CRYPTO_KEYRING_JSON")
+          ? std::getenv("ORCHRA_REDIS_CRYPTO_KEYRING_JSON") : "";
+        cfg.aad = std::getenv("ORCHRA_REDIS_CRYPTO_AAD")
+          ? std::getenv("ORCHRA_REDIS_CRYPTO_AAD") : "okra:redis:context:v1";
+
+        // safe migration mode
+        cfg.dual_write_plaintext = true;
+        cfg.write_encrypted_shadow = true;
+
+        orchra::init_redis(internal_api.redis_url, cfg);
+ 
         Logger::smf_app().info("Orchra: Successfully initialized from %s", m_local_config_path.c_str());    
     } else {
         Logger::smf_app().warn("Orchra: 'internal_api' block not found in %s", m_local_config_path.c_str());
