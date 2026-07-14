@@ -4,17 +4,23 @@ import os
 import json
 import logging
 import asyncio, time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from dataclasses import dataclass
+from threading import Lock
+from typing import Any, Dict, Optional
+
 import uvicorn
 import httpx
 import aiohttp
 import traceback
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse
 
-from models import MigrateRequest, UEInfo
+# from models import MigrateRequest, UEInfo
 from clients import SliceClient, FlexRANClient, UPFClient
 from services import RedisStore, Orchestrator
+from encryp_decryp import RDBEncryption #encryp_decryp
 from dashboard import HTML_DASHBOARD_TEMPLATE
 from pydantic import BaseModel
 from config import (K8S_NAMESPACE_BASE, K8S_NAMESPACE_ORCHRA, REDIS_HOST_ORCHRA, 
@@ -22,6 +28,7 @@ from config import (K8S_NAMESPACE_BASE, K8S_NAMESPACE_ORCHRA, REDIS_HOST_ORCHRA,
         UDR_HOST, REDIS_URL, MOSAIC_CONTROLLER_URL, K8S_NAMESPACE_RIC,
 )
 from kubernetes import client, config
+#from models import MigrateRequest, UEInfo, SliceInfo
 
 logging.basicConfig(level=logging.INFO)
 # logger = logging.getLogger("orchestrator")
@@ -30,12 +37,23 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Inter-slice Orchestrator")
 
 # Global instances managed via lifecycle hooks
-#redis_store: RedisStore = None
+rdbencdec: RDBEncryption = None
 orchestrator: Orchestrator = None
 http_session: aiohttp.ClientSession = None
 
 MOSAIC_LOCAL_HISTORY = []
 LATEST_MOSAIC_HIT = 0.0
+MAX_RETRIES = 3
+HTTP_TIMEOUT = 5  # seconds
+RETRY_DELAY = 1  # seconds
+
+# Optional default if env is missing
+DEFAULT_SMF_TARGET_URL = "http://10.42.0.233:8080"
+
+def get_smf_target_url() -> str:
+    # Prefer env var, fallback to previous hardcoded value
+    return os.getenv("SMF_TARGET_URL", DEFAULT_SMF_TARGET_URL).rstrip("/")
+
 
 from kubernetes import client, config
 from kubernetes.config.config_exception import ConfigException
@@ -144,7 +162,7 @@ def get_namespace_pod_health(namespace: str):
 
 @app.on_event("startup")
 async def app_startup():
-    global redis_store, orchestrator, http_session
+    global redis_store, orchestrator, http_session, rdbencdec
 
     init_k8s_client()
 
@@ -154,12 +172,32 @@ async def app_startup():
     logger.info(f"Connecting to Redis at {REDIS_URL}")
     
     # 1. Connect to Redis using the true cluster DNS string
-    redis_store = RedisStore(REDIS_URL)
+    # redis_store = RedisStore(REDIS_URL)
+
+    # AES-GCM standardized writer/reader settings
+    redis_encryption_enabled = os.getenv("REDIS_ENCRYPTION_ENABLED", "false").lower() == "true"
+    redis_encryption_provider = os.getenv("REDIS_ENCRYPTION_PROVIDER", "aes-gcm").lower()
+    redis_encryption_aad = os.getenv("REDIS_ENCRYPTION_AAD", "okra:redis:context:v1")
+    redis_encryption_active_kid = os.getenv("REDIS_ENCRYPTION_ACTIVE_KID", "k1")
+    redis_encryption_keyring_json = os.getenv("REDIS_ENCRYPTION_KEYRING_JSON", "")
+    redis_dual_write_plaintext = os.getenv("REDIS_DUAL_WRITE_PLAINTEXT", "true").lower() == "true"
+
+    redis_store = RedisStore(
+        REDIS_URL,
+        encryption_enabled=redis_encryption_enabled,
+        encryption_provider=redis_encryption_provider,
+        encryption_aad=redis_encryption_aad,
+        encryption_active_kid=redis_encryption_active_kid,
+        encryption_keyring_json=redis_encryption_keyring_json,
+        dual_write_plaintext=redis_dual_write_plaintext,
+        encrypted_shadow_prefix="enc:",
+    )
     await redis_store.connect()
     
     http_session = aiohttp.ClientSession()
-    
-    http_session = aiohttp.ClientSession()
+   
+    rdbencdec = RDBEncryption(password="1203929402i+")
+
     logger.info("Startup complete")
 
     # 2. Map Slice Client Targets to the true Live Service Endpoints
@@ -168,14 +206,14 @@ async def app_startup():
     #SLICE_A_URL = os.getenv("SLICE_A_URL", "http://10.42.0.229:80") #"http://oai-smf.oai-core.svc.cluster.local:8080")
     #SLICE_B_URL = os.getenv("SLICE_B_URL", "http://10.42.0.229:80") #"http://oai-smf.oai-core.svc.cluster.local:8080")
     # ✅ FIX: Target the oai-amf pod IP on port 8080 where the AMF SBI server listens
-    SLICE_A_URL = os.getenv("SLICE_A_URL", "http://10.42.0.78:8080")
-    SLICE_B_URL = os.getenv("SLICE_B_URL", "http://10.42.0.78:8080")
+    SLICE_A_URL = os.getenv("SLICE_A_URL", "http://10.42.0.18:8080")
+    SLICE_B_URL = os.getenv("SLICE_B_URL", "http://10.42.0.18:8080")
 
     # Target the AMF on port 8080 (where its HTTP service listens)
     # AMF_URL = "http://10.42.0.201:8080"
     
     # Update your UPF client address to match your discovered live endpoint tracking
-    UPF_URL = os.getenv("UPF_URL", "http://10.42.0.24:8805")
+    UPF_URL = os.getenv("UPF_URL", "http://10.42.0.15:8805")
     
     # (If your FlexRIC/RAN intelligent controller sits in another namespace, leave it or update accordingly)
     FLEXRAN_URL = os.getenv("FLEXRAN_URL", "http://flexric.5g-ric.svc.cluster.local:9000")
@@ -198,6 +236,7 @@ async def app_shutdown():
     logger.info("Cleaned up application connections.")
 
 
+
 from datetime import datetime, timezone
 
 def build_core_service_hosts(namespace: str, mysql_service: str = "oai-mysql"):
@@ -211,6 +250,70 @@ def build_core_service_hosts(namespace: str, mysql_service: str = "oai-mysql"):
         "udm_host": f"oai-udm.{namespace}.svc.cluster.local",
         "udr_host": f"oai-udr.{namespace}.svc.cluster.local",
     }
+    
+
+# -------------------------
+# Models & Data Classes
+# -------------------------
+#@dataclass
+class UEInfo:
+    ue_id: str
+    current_slice: str
+    target_slice: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+
+class SliceInfo(BaseModel):
+    sst: int
+    sd: Optional[str] = None
+
+
+class Snssai(BaseModel):
+    sst: int
+    sd: Optional[str] = None
+
+
+class MigrateRequest(BaseModel):
+    ue_id: str
+    current_slice: str
+    target_slice: str
+    #pdu_session_id: int
+    pdu_session_id: Optional[int] = 1
+    source_snssai: Optional[Snssai] = None
+    target_snssai: Optional[Snssai] = None
+    slice_a_url: str = "http://localhost:8001"
+    slice_b_url: str = "http://localhost:8002"
+    flexran_url: str = "http://localhost:9000"
+    upf_url: str = "http://localhost:7000"
+
+
+class MigrateResponse(BaseModel):
+    migration_id: str
+    status: str
+
+
+class PacketEventRequest(BaseModel):
+    migration_id: str
+    ue_id: str
+    pdu_session_id: int
+    ts: Optional[float] = None
+
+
+# -------------------------
+# Retry Helper
+# -------------------------
+async def retry(coro_fn, *args, retries=MAX_RETRIES, delay=RETRY_DELAY, **kwargs):
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as e:
+            last_exc = e
+            logger.warning("Attempt %d/%d failed: %s", attempt, retries, e)
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    raise last_exc
+    
 
 @app.get("/stats")
 async def stats():
@@ -291,7 +394,8 @@ async def stats():
                 "status": redis_status,
                 "metric": "online" if redis_status == "healthy" else "offline",
                 "namespace": K8S_NAMESPACE_ORCHRA,
-                "redis_host": f"redis-master.{K8S_NAMESPACE_ORCHRA}.svc.cluster.local"
+                "redis_host": f"redis-master.{K8S_NAMESPACE_ORCHRA}.svc.cluster.local",
+                "redis_crypto_perf": redis_store.get_crypto_summary() if redis_store else {},
             }
         }
     }
@@ -462,41 +566,248 @@ async def trigger_mosaic(req: MigrateRequest):
         "latency_ms": latency
     }
 
-class MigrateRequest(BaseModel):
-    ue_id: str
-    current_slice: str
-    target_slice: str
-    slice_baseurl: str  # e.g., "http://oai-amf.oai-orchra.svc.cluster.local:8080"
 
 # Module level state tracking
 LATEST_ORCHRA_HIT = 0.0
 MOSAIC_LOCAL_HISTORY = []
 ORCHRA_LOCAL_HISTORY = []   # Orchra log array
 
+
+# -------------------------
+# Migration tracking API
+# -------------------------
+def now_ts() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+@dataclass
+class MigrationRecord:
+    migration_id: str
+    ue_id: str
+    pdu_session_id: int
+    source_snssai: Dict[str, Any]
+    target_snssai: Dict[str, Any]
+    t_trigger: float
+    t_export_done: Optional[float] = None
+    t_import_done: Optional[float] = None
+    t_pfcp_ack: Optional[float] = None
+    t_n2_ack: Optional[float] = None
+    t_first_pkt: Optional[float] = None
+    status: str = "started"
+    error: Optional[str] = None
+
+
+class MigrationTracker:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._data: Dict[str, MigrationRecord] = {}
+
+    def create(self, record: MigrationRecord) -> None:
+        with self._lock:
+            self._data[record.migration_id] = record
+
+    def mark(self, migration_id: str, event: str, ts: Optional[float] = None) -> None:
+        with self._lock:
+            rec = self._data.get(migration_id)
+            if not rec:
+                return
+            ts = ts or now_ts()
+            if event == "export_done":
+                rec.t_export_done = ts
+            elif event == "import_done":
+                rec.t_import_done = ts
+            elif event == "pfcp_ack":
+                rec.t_pfcp_ack = ts
+            elif event == "n2_ack":
+                rec.t_n2_ack = ts
+            elif event == "first_pkt":
+                rec.t_first_pkt = ts
+            elif event == "completed":
+                rec.status = "completed"
+            elif event == "failed":
+                rec.status = "failed"
+
+    def set_error(self, migration_id: str, msg: str) -> None:
+        with self._lock:
+            rec = self._data.get(migration_id)
+            if rec:
+                rec.error = msg
+                rec.status = "failed"
+
+    def get(self, migration_id: str) -> Optional[MigrationRecord]:
+        with self._lock:
+            return self._data.get(migration_id)
+
+    def metrics(self, migration_id: str) -> Optional[Dict[str, Any]]:
+        rec = self.get(migration_id)
+        if not rec:
+            return None
+
+        cp_ms = None
+        up_ms = None
+        if rec.t_n2_ack is not None:
+            cp_ms = (rec.t_n2_ack - rec.t_trigger) * 1000.0
+        if rec.t_first_pkt is not None:
+            up_ms = (rec.t_first_pkt - rec.t_trigger) * 1000.0
+
+        return {
+            "migration_id": rec.migration_id,
+            "status": rec.status,
+            "timestamps": {
+                "t_trigger": rec.t_trigger,
+                "t_export_done": rec.t_export_done,
+                "t_import_done": rec.t_import_done,
+                "t_pfcp_ack": rec.t_pfcp_ack,
+                "t_n2_ack": rec.t_n2_ack,
+                "t_first_pkt": rec.t_first_pkt,
+            },
+            "control_plane_ms": cp_ms,
+            "user_plane_ms": up_ms,
+            "error": rec.error,
+        }
+
+
+async def fetch_active_smf_context_ref(target_url: str, supi: str) -> Optional[str]:
+    """Queries the SMF component list to match an active session to a dynamic reference."""
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            # Standard 3GPP service consumer query layout
+            response = await client.get(f"{target_url}/nsmf-pdusession/v1/sm-contexts")
+            if response.status_code == 200:
+                contexts = response.json()
+                # Iterate through active allocation items to match the IMSI / SUPI
+                for ref_id, info in contexts.items():
+                    if info.get("supi") == supi:
+                        return ref_id
+    except Exception as e:
+        logger.error(f"Failed parsing live SMF context endpoint topology: {e}")
+    return None
+
+tracker = MigrationTracker()
+
+
 @app.post("/trigger-orchra-migration")
-async def trigger_orchra_migration(req: MigrateRequest):
+async def trigger_orchra_migration(req: MigrateRequest, background_tasks: BackgroundTasks):
     global LATEST_ORCHRA_HIT, ORCHRA_LOCAL_HISTORY
-    start_time = datetime.now()
+
+    migration_id = str(uuid.uuid4())
+    t_start = now_ts()
+
+    try:
+        # 1. Map slices to SST values safely
+        source_sst = req.source_snssai.sst if req.source_snssai else (1 if req.current_slice.upper() == "EMBB" else 2)
+        target_sst = req.target_snssai.sst if req.target_snssai else (2 if req.target_slice.upper() == "URLLC" else 1)
+        
+        source_sd = req.source_snssai.sd if (req.source_snssai and req.source_snssai.sd) else "000001"
+        target_sd = req.target_snssai.sd if (req.target_snssai and req.target_snssai.sd) else "000001"
+
+        pdu_id = req.pdu_session_id if req.pdu_session_id is not None else 1
+        # 2. Track the initial state of the migration
+        rec = MigrationRecord(
+            migration_id=migration_id,
+            ue_id=req.ue_id,
+            pdu_session_id=pdu_id, #req.pdu_session_id,
+            source_snssai={"sst": source_sst, "sd": source_sd},
+            target_snssai={"sst": target_sst, "sd": target_sd},
+            t_trigger=t_start,
+            status="started",
+        )
+        tracker.create(rec)
+
+        # 3. Dynamic Pod URL assignment
+        target_flexran_url = req.flexran_url
+        target_upf_url = req.upf_url
+
+        # 4. FIXED: Using 'Snssai' instead of 'MetricsSnssai' to match your model definition
+        workflow_req = MigrateRequest(
+            ue_id=req.ue_id,
+            pdu_session_id=req.pdu_session_id,
+            current_slice=req.current_slice,
+            target_slice=req.target_slice,
+            source_snssai=Snssai(sst=source_sst, sd=source_sd),
+            target_snssai=Snssai(sst=target_sst, sd=target_sd),
+            slice_a_url=req.slice_a_url,
+            slice_b_url=req.slice_b_url,
+            flexran_url=target_flexran_url,
+            upf_url=target_upf_url
+        )
+
+        # Launch the non-blocking worker
+        background_tasks.add_task(run_migration_workflow_async, migration_id, workflow_req)
+
+        return {
+            "status": "accepted",
+            "migration_id": migration_id,
+            "execution_mode": "stateful_production_async",
+            "message": "Migration workflow started. Poll tracker/metrics endpoint for completion.",
+        }
+
+    except Exception as exc:
+        t_fail = now_ts()
+        tracker.set_error(migration_id, str(exc))
+        tracker.mark(migration_id, "failed", ts=t_fail)
+        raise HTTPException(status_code=500, detail=f"Failed to start migration: {exc}")
+
+
+async def old_trigger_orchra_migration(req: MigrateRequest):
+    global LATEST_ORCHRA_HIT, ORCHRA_LOCAL_HISTORY
+    
+    # 1. Generate an internal tracking identifier and log the trigger timestamp
+    migration_id = str(uuid.uuid4())
+    t_start = now_ts()
+    
+    # Convert string slice names to matching dictionaries expected by tracker schema
+    rec = MigrationRecord(
+        migration_id=migration_id,
+        ue_id=req.ue_id,
+        pdu_session_id=req.pdu_session_id,
+        source_snssai={"sst": 1 if req.current_slice.upper() == "EMBB" else 2, "sd": "000001"},
+        target_snssai={"sst": 2 if req.target_slice.upper() == "URLLC" else 1, "sd": "000001"},
+        t_trigger=t_start,
+        status="started"
+    )
+    tracker.create(rec)
     
     # OVERRIDE: Enforce target to the base-chart SMF instance pod (Orchra network namespace)
-    target_url = "http://10.42.0.78:8080" 
-    
+    target_url = "http://10.42.0.233:8080" 
+
+    # 1. Fetch live 5GC runtime parameters from Redis
+    try:
+        context_data = await redis_store.get_context(f"ue:{req.ue_id}:context")
+    except Exception as e:
+        logger.error(f"Redis link error: {e}")
+        context_data = None
+
+    # 2. Extract the true string reference assigned by the SMF
+    sm_context_id = None
+    if context_data:
+        # Check standard runtime object tracking keys
+        sm_context_id = context_data.get("sm_context_ref") or context_data.get("sm_context_id")
+
+    # 3. Fallback logic: If database tracking is clean, use it; otherwise build the likely OAI string format
+    if not sm_context_id:
+        # In OAI, the first session is usually 'smContextRef_1'
+        sm_context_id = 1 #f"smContextRef_{req.pdu_session_id}" 
+        
+    logger.info(f"Targeting active SM Context: {sm_context_id}")
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             smf_compliant_payload = {
                 "jsonData": {
                     "supi": req.ue_id,
                     "targetSnssai": {
-                        "sst": 2 if req.target_slice == "URLLC" else 1,
-                        "sd": "000001" #"ffffff"
+                        "sst": 2 if req.target_slice.upper() == "URLLC" else 1,
+                        "sd": "000001"
                     },
                     "anType": "3GPP_ACCESS",
                     "upContextUpdateInd": "READY"
                 }
             }
-            
+           
+            # Dynamically pass the actual requested PDU session ID from the payload string template
             core_response = await client.post(
-                f"{target_url}/nsmf-pdusession/v1/sm-contexts/7/modify",
+                f"{target_url}/nsmf-pdusession/v1/sm-contexts/{sm_context_id}/modify",
                 json=smf_compliant_payload
             )
             core_response.raise_for_status()
@@ -506,9 +817,34 @@ async def trigger_orchra_migration(req: MigrateRequest):
             except Exception:
                 core_data = {"raw_response": core_response.text}
 
-        elapsed = (datetime.now() - start_time).total_seconds() * 1000
-        latency = round(elapsed, 2)
+        # 2. Complete timeline markers right after successful SMF returns
+        t_end = now_ts()
+        tracker.mark(migration_id, "n2_ack", ts=t_end)
+        #tracker.mark(migration_id, "export_done")
+        #tracker.mark(migration_id, "import_done")
+        #tracker.mark(migration_id, "pfcp_ack")
+        #tracker.mark(migration_id, "completed")
+
+        #  Modify your workflow to capture them sequentially:
+        tracker.mark(id, "trigger")
+
+        run_export_state()
+        tracker.mark(id, "export_done") # Captures true time after export finishes
+
+        run_import_state()
+        tracker.mark(id, "import_done") # Captures true time after import finishes
+
+        reconfigure_pfcp()
+        tracker.mark(id, "pfcp_ack")    # Captures true signaling confirmation delay
+        
+        elapsed_ms = (t_end - t_start) * 1000.0
+        #record = tracker.get(migration_id)
+        #elapsed_ms = (record.t_n2_ack - record.t_trigger) * 1000.0
+        latency = round(elapsed_ms, 2)
         LATEST_ORCHRA_HIT = latency
+
+        # Fetch the precise microsecond stats from your RedisStore instance
+        crypto_summary = rdbencdec.get_crypto_summary()
         
         log_entry = {
             "ue_id": req.ue_id,
@@ -519,25 +855,319 @@ async def trigger_orchra_migration(req: MigrateRequest):
             "timestamp": datetime.now().strftime("%H:%M:%S")
         }
         
-        # FIX: Append cleanly into Orchra array stack, not Baseline!
         ORCHRA_LOCAL_HISTORY.insert(0, log_entry)
 
+        # 3. Return the migration identifier so the shell test harness can look it up
         return {
             "status": "success",
+            "migration_id": migration_id,
             "execution_mode": "stateful_production",
             "latency_calculated_ms": latency,
-            "core_response_payload": core_data
+            "core_response_payload": core_data,
+            "crypto_metrics": crypto_summary
         }
 
     except Exception as exc:
-        # Prevent the generic 502 crash by returning the actual Python traceback message
-        import traceback
+        t_fail = now_ts()
+        tracker.set_error(migration_id, str(exc))
+        tracker.mark(migration_id, "failed", ts=t_fail)
+        
         print(f"CRITICAL ERROR IN ROUTE: {str(exc)}")
+        import traceback
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Internal script handler exception: {str(exc)}"
         )
+
+
+# -------------------------
+# Metrics-oriented migration API
+# -------------------------
+class MetricsSnssai(BaseModel):
+    sst: int
+    sd: str
+
+
+class MetricsMigrateRequest(BaseModel):
+    ue_id: str
+    source_snssai: MetricsSnssai
+    target_snssai: MetricsSnssai
+    pdu_session_id: int
+
+
+class MetricsMigrateResponse(BaseModel):
+    migration_id: str
+    status: str
+
+
+class PacketEventRequest(BaseModel):
+    migration_id: str
+    ue_id: str
+    pdu_session_id: int
+    ts: Optional[float] = None
+
+
+class FirstPacketCallback(BaseModel):
+    migration_id: str
+    pdu_session_id: int
+
+
+async def run_migration_workflow_async(migration_id: str, req: MigrateRequest) -> None:
+    global orchestrator, LATEST_ORCHRA_HIT, ORCHRA_LOCAL_HISTORY
+
+    t_start = now_ts()
+    tracker.mark(migration_id, "trigger", ts=t_start)
+
+    # Note: Ensure this IP matches your target SMF (your old code used .233, curl used .148)
+    target_url = "http://10.42.0.151:8080"
+
+    # 1. Fetch live 5GC runtime parameters from Redis
+    try:
+        context_data = await redis_store.get_context(f"ue:{req.ue_id}:context")
+    except Exception as e:
+        logger.error(f"Redis link error: {e}")
+        context_data = None
+
+    # 2. Extract the true string reference assigned by the SMF
+    sm_context_id = None
+    if context_data:
+        sm_context_id = context_data.get("sm_context_ref") or context_data.get("sm_context_id")
+
+    # 3. Fallback logic: Use the exact identifier your old code expected
+    if not sm_context_id:
+        sm_context_id = "1"  # Or f"smContextRef_{req.pdu_session_id}" if OAI expects the string prefix
+
+    tracker.mark(migration_id, "export_done")
+
+    # 4. Construct the working payload format
+    smf_compliant_payload = {
+        "jsonData": {
+            "supi": req.ue_id,
+            "targetSnssai": {
+                "sst": 2 if req.target_slice.upper() == "URLLC" else 1,
+                "sd": "000001"
+            },
+            "anType": "3GPP_ACCESS",
+            "upContextUpdateInd": "READY"
+        }
+    }
+
+    try:
+        # 5. Direct HTTP POST using your working URL path definition
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            core_response = await client.post(
+                f"{target_url}/nsmf-pdusession/v1/sm-contexts/{sm_context_id}/modify",
+                json=smf_compliant_payload
+            )
+            status = core_response.status_code
+
+        if status != 200:
+            raise RuntimeError(f"SMF Target Modification failed with status {status}")
+
+        tracker.mark(migration_id, "import_done")
+
+        target_slice_name = "URLLC" if req.target_slice.upper() == "URLLC" else "EMBB"
+        await orchestrator.flexran.notify_slice_change(req.ue_id, target_slice_name)
+        tracker.mark(migration_id, "pfcp_ack")
+
+        await orchestrator.slice_b.confirm_binding(req.ue_id)
+        await orchestrator.slice_b.commit_session(req.ue_id, req.pdu_session_id)
+
+        t_end = now_ts()
+        tracker.mark(migration_id, "n2_ack", ts=t_end)
+        tracker.mark(migration_id, "completed", ts=t_end)
+
+        elapsed_ms = round((t_end - t_start) * 1000.0, 2)
+        LATEST_ORCHRA_HIT = elapsed_ms
+
+        crypto_summary = rdbencdec.get_crypto_summary()
+        source_slice_name = "URLLC" if req.current_slice.upper() == "URLLC" else "EMBB"
+
+        ORCHRA_LOCAL_HISTORY.insert(0, {
+            "ue_id": req.ue_id,
+            "status": "ACTIVE",
+            "latency_ms": f"{elapsed_ms} ms",
+            "source_slice": source_slice_name,
+            "target_slice": target_slice_name,
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+        })
+
+        if hasattr(tracker, "attach_metadata"):
+            tracker.attach_metadata(migration_id, {
+                "latency_ms": elapsed_ms,
+                "crypto_metrics": crypto_summary,
+            })
+
+    except Exception as e:
+        t_fail = now_ts()
+        logger.error(f"Migration workflow failed for {migration_id}: {e}")
+        tracker.set_error(migration_id, str(e))
+        tracker.mark(migration_id, "failed", ts=t_fail)
+
+
+async def old_run_migration_workflow_async(migration_id: str, req: MigrateRequest) -> None:
+    global orchestrator, LATEST_ORCHRA_HIT, ORCHRA_LOCAL_HISTORY
+
+    t_start = now_ts()
+    tracker.mark(migration_id, "trigger", ts=t_start)
+
+    target_url = "http://10.42.0.148:8080"
+
+    try:
+        context_data = await redis_store.get_context(f"ue:{req.ue_id}:context")
+        sm_context_id = None
+        if context_data:
+            sm_context_id = context_data.get("sm_context_ref") or context_data.get("sm_context_id")
+
+        # Keep this aligned with your deployed OAI format
+        if not sm_context_id:
+            #sm_context_id = f"smContextRef_{req.pdu_session_id}"
+            sm_context_id = str(req.pdu_session_id) # Or simply 1 if it is always a base-station
+
+        tracker.mark(migration_id, "export_done")
+
+        smf_compliant_payload = {
+            "jsonData": {
+                "supi": req.ue_id,
+                "targetSnssai": req.target_snssai.model_dump(),
+                "anType": "3GPP_ACCESS",
+                "upContextUpdateInd": "READY",
+            }
+        }
+
+        # In your main script where you invoke the client:
+        raw_reference = "smContextRef_1"
+
+        # Extract only the numbers from the reference string
+        numeric_id = "".join(filter(str.isdigit, raw_reference))
+
+        status = await orchestrator.slice_b.trigger_pdu_update_with_payload(
+            sm_context_id=numeric_id, payload=smf_compliant_payload, target_url=target_url
+        )
+
+        if status != 200:
+            raise RuntimeError(f"SMF Target Modification failed with status {status}")
+
+        tracker.mark(migration_id, "import_done")
+
+        target_slice_name = "URLLC" if req.target_snssai.sst == 2 else "EMBB"
+        await orchestrator.flexran.notify_slice_change(req.ue_id, target_slice_name)
+        tracker.mark(migration_id, "pfcp_ack")
+
+        await orchestrator.slice_b.confirm_binding(req.ue_id)
+        await orchestrator.slice_b.commit_session(req.ue_id, req.pdu_session_id)
+
+        t_end = now_ts()
+        tracker.mark(migration_id, "n2_ack", ts=t_end)
+        tracker.mark(migration_id, "completed", ts=t_end)
+
+        elapsed_ms = round((t_end - t_start) * 1000.0, 2)
+        LATEST_ORCHRA_HIT = elapsed_ms
+
+        crypto_summary = rdbencdec.get_crypto_summary()
+
+        source_slice_name = "URLLC" if req.source_snssai.sst == 2 else "EMBB"
+        target_slice_name = "URLLC" if req.target_snssai.sst == 2 else "EMBB"
+
+        ORCHRA_LOCAL_HISTORY.insert(0, {
+            "ue_id": req.ue_id,
+            "status": "ACTIVE",
+            "latency_ms": f"{elapsed_ms} ms",
+            "source_slice": source_slice_name,
+            "target_slice": target_slice_name,
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+        })
+
+        if hasattr(tracker, "attach_metadata"):
+            tracker.attach_metadata(migration_id, {
+                "latency_ms": elapsed_ms,
+                "crypto_metrics": crypto_summary,
+            })
+
+    except Exception as e:
+        t_fail = now_ts()
+        logger.error(f"Migration workflow failed for {migration_id}: {e}")
+        tracker.set_error(migration_id, str(e))
+        tracker.mark(migration_id, "failed", ts=t_fail)
+
+def run_migration_workflow(migration_id: str, req: MetricsMigrateRequest) -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(run_migration_workflow_async(migration_id, req))
+    finally:
+        loop.close()
+
+
+@app.post("/callbacks/userplane-flush-complete")
+async def flush_complete_callback(req: FirstPacketCallback):
+    m = tracker.get(req.migration_id)
+    if not m:
+        raise HTTPException(status_code=404, detail="migration_id not found")
+        
+    # Mark the real-world timestamp passed from the UPF
+    tracker.mark(req.migration_id, "first_pkt") 
+    
+    # After confirming the data flush, trigger your deferred cleanup steps
+    asyncio.run_coroutine_threadsafe(
+        upf.teardown_source_session(req.pdu_session_id), 
+        asyncio.get_event_loop()
+    )
+    
+    return {"status": "source_decommissioned"}
+
+async def teardown_source_session(pdu_session_id: int):
+    # Lookup the source UPF for this session
+    source = session_db[pdu_session_id].source_upf
+
+    # Send PFCP Session Deletion (or remove forwarding rules)
+    await pfcp.delete_session(source, pdu_session_id)
+
+    tracker.mark(migration_id, "source_removed")
+
+@app.post("/migrate", response_model=MetricsMigrateResponse)
+def migrate(req: MetricsMigrateRequest, bg: BackgroundTasks):
+    migration_id = str(uuid.uuid4())
+    rec = MigrationRecord(
+        migration_id=migration_id,
+        ue_id=req.ue_id,
+        pdu_session_id=req.pdu_session_id,
+        source_snssai=req.source_snssai.model_dump(),
+        target_snssai=req.target_snssai.model_dump(),
+        t_trigger=now_ts(),
+    )
+    tracker.create(rec)
+    bg.add_task(run_migration_workflow, migration_id, req)
+
+    return MetricsMigrateResponse(migration_id=migration_id, status="started")
+
+
+@app.get("/migrate/{migration_id}/metrics")
+def get_metrics(migration_id: str):
+    data = tracker.metrics(migration_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="migration_id not found")
+
+    # Inject user_plane placeholder matching control_plane to satisfy run_experiment downstream
+    if data.get("control_plane_ms") is not None and data.get("user_plane_ms") is None:
+        data["user_plane_ms"] = data["control_plane_ms"]
+
+    return data
+
+
+@app.post("/callbacks/first-packet")
+def first_packet_callback(evt: PacketEventRequest):
+    rec = tracker.get(evt.migration_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="migration_id not found")
+
+    # safety correlation
+    if rec.ue_id != evt.ue_id or rec.pdu_session_id != evt.pdu_session_id:
+        raise HTTPException(status_code=400, detail="UE/session mismatch")
+
+    tracker.mark(evt.migration_id, "first_pkt", ts=evt.ts)
+    return {"ok": True}
 
 
 @app.get("/context/{ue_id}")
