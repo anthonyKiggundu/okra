@@ -326,6 +326,12 @@ bool smf_n2::create_n2_pdu_session_resource_modify_request_transfer(
       return false;
   }
 
+  Logger::smf_n2().info(
+    "ORCHRA-DBG N2 modify transfer: sc=%p SUPI=%s migrated=%d migrating=%d",
+    sc.get(), sc ? sc->get_supi().c_str() : "null",
+    sc ? sc->get_custom_flag("migrated") : 0,
+    sc ? sc->get_custom_flag("migrating") : 0);
+
   // --- ORCHRA HOOK START ---
   if (sc->get_custom_flag("migrated")) {
        auto selected_upf_ptr = sc->get_selected_upf(); // Uses the shared_ptr getter we added

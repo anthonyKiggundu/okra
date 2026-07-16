@@ -1673,6 +1673,12 @@ bool smf_context::handle_pdu_session_release_request(
     sm_context_request->req.add_qfi(qfi.qfi);
   }
 
+  // ---------------------- Orchra ------------------------
+  Logger::smf_app().info(
+    "ORCHRA-DBG SM Context status change: this=%p SUPI=%s new_status=%s",
+    this, supi.c_str(), "unknown");
+  // ---------------------end of Orchra -------------------
+
   return true;
 }
 
@@ -1730,6 +1736,12 @@ bool smf_context::handle_pdu_session_release_complete(
         "Signal the PDU Session Release Event notification");
     trigger_pdu_session_release(scid, 1);
   }
+
+  // ----------------- Begin Orchra ----------------
+  Logger::smf_app().info(
+    "ORCHRA-DBG SM Context status change: this=%p SUPI=%s new_status=%s",
+    this, supi.c_str(), "unknown");
+  // ------------------ End of Orchra ------------------
 
   // SM Policy Association termination
   if (sp->policy_ptr) {
@@ -3493,6 +3505,9 @@ bool smf_context::add_pdu_session(
 
 //------------------------------------------------------------------------------
 bool smf_context::remove_pdu_session(const pdu_session_id_t& psi) {
+  Logger::smf_app().info(
+    "ORCHRA-DBG remove_pdu_session: this=%p SUPI=%s psi=%u before_size=%zu",
+    (const void*) this, supi.c_str(), (unsigned) psi, pdu_sessions.size());
   Logger::smf_app().debug(
       "Failed to add PDU Session (Id %d) failed: invalid Id", psi);
   std::unique_lock lock(m_pdu_sessions_mutex);
@@ -3614,7 +3629,13 @@ void smf_context::handle_sm_context_status_change(
   itti_msg->scid              = scid;
   itti_msg->sm_context_status = status;
   itti_msg->amf_status_uri    = get_amf_status_uri();
-
+  
+  // ----------------------- Begin of Orchra -----------------------
+  Logger::smf_app().info(
+    "ORCHRA-DBG SM Context status change: this=%p SUPI=%s new_status=%s",
+    (const void*) this, supi.c_str());
+  // ----------------------- enf of Orchra ------------------------
+  
   int ret = itti_inst->send_msg(itti_msg);
   if (RETURNok != ret) {
     Logger::smf_app().error(

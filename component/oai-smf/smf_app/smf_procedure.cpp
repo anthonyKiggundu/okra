@@ -1883,6 +1883,16 @@ session_release_sm_context_procedure::send_n4_session_deletion_request() {
   Logger::smf_app().info(
       "Sending ITTI message %s to task TASK_SMF_N4",
       n4_triggered->get_msg_name());
+   
+  // ---------------------- Beginning of Orchra -----------------
+  Logger::smf_app().info(
+    "ORCHRA-DBG send N4 delete: sc=%p SUPI=%s seid=" SEID_FMT,
+    (void*) sc.get(), (sc ? sc->get_supi().c_str() : "null"), sps->up_fseid.seid);
+
+    // "ORCHRA-DBG send N4 delete: sc=%p SUPI=%s seid=" SEID_FMT " trxn=%lu",
+    //sc.get(), sc ? sc->get_supi().c_str() : "null", sps->up_fseid.seid, trxn_id);
+  // --------------------- enf of Orchra -----------------------
+
   int ret = itti_inst->send_msg(n4_triggered);
   if (RETURNok != ret) {
     Logger::smf_app().error(
@@ -1955,6 +1965,14 @@ smf_procedure_code session_release_sm_context_procedure::run(
 smf_procedure_code session_release_sm_context_procedure::handle_itti_msg(
     itti_n4_session_deletion_response& resp,
     std::shared_ptr<smf::smf_context> sc) {
+
+  // --------------------------- Brgin of Orchra -------------------
+  Logger::smf_app().info(
+    "ORCHRA-DBG got N4 delete rsp: sc=%p SUPI=%s cause_present=%d cause=%u",
+    sc.get(), sc ? sc->get_supi().c_str() : "null",
+    resp.pfcp_ies.cause.first ? 1 : 0,
+    resp.pfcp_ies.cause.first ? resp.pfcp_ies.cause.second.cause_value : 0);
+  // ----------------------- end of  Orchra -------------------------
   Logger::smf_app().info(
       "Handle itti_n4_session_deletion_response (Release SM Context "
       "Request): "
