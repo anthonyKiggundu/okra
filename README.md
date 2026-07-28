@@ -1,6 +1,6 @@
 # Orchra
 
-Based on the paper: Orchra: Stateful-aware Cross-slice Workload Migrations in the 6G Control Plane
+Based on the paper: _Orchra: Stateful-aware Cross-slice Workload Migrations in the 6G Control Plane_
 
 Orchra is a 5G orchestration and experimentation repository that combines:
 
