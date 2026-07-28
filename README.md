@@ -1,5 +1,7 @@
 # Orchra
 
+Based on the paper: Orchra: Stateful-aware Cross-slice Workload Migrations in the 6G Control Plane
+
 Orchra is a 5G orchestration and experimentation repository that combines:
 
 - **Customized OAI core components** under `component/`
