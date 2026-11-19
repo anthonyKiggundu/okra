@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slicing-xapp
+  namespace: 5g-ric
+  labels:
+    app: slicing-xapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: slicing-xapp
+  template:
+    metadata:
+      labels:
+        app: slicing-xapp
+    spec:
+      containers:
+      - name: slicing-xapp
+        image: your-registry/slicing-xapp:latest  # Replace with your container registry path
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "1.0"
+            memory: "1Gi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+        env:
+        - name: RIC_IP
+          value: "flexric-service.5g-ric.svc.cluster.local"  # Internal cluster DNS for Near-RT RIC
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false

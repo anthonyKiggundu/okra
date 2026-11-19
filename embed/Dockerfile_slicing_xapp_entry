@@ -1,0 +1,28 @@
+# Use an official lightweight Python image
+FROM python:3.10-slim
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Install system dependencies required for compilation and networking
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch (CPU-optimized version for xApp control plane inference)
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Copy the xApp control script into the container
+COPY main.py /app/main.py
+
+# If you have local FlexRIC python bindings / wrappers, copy them here:
+# COPY flexric /app/flexric
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Run the xApp entrypoint
+CMD ["python3", "main.py"]
